@@ -64,9 +64,43 @@ function M.uproject_reload(dir)
 
 	local engine_association = M.uproject_engine_association(dir)
 	if engine_association ~= nil then
+		local has_fidget, fidget = pcall(require, 'fidget')
+		local fidget_progress = nil
+
+		if has_fidget then
+			fidget_progress = fidget.progress.handle.create({
+				key = "UProjectReload",
+				title = "Reload Uproject",
+				message = "",
+				lsp_client = { name = "ubt" },
+				percentage = 0,
+				cancellable = true,
+			})
+		end
+
+		local function notify_info(msg)
+			if has_fidget then
+				---@diagnostic disable-next-line: need-check-nil
+				fidget_progress.message = msg
+			end
+		end
+
+		local function notify_error(msg)
+			if has_fidget then
+				---@diagnostic disable-next-line: need-check-nil
+				fidget_progress.message = msg
+				---@diagnostic disable-next-line: need-check-nil
+				fidget_progress:cancel()
+			else
+				vim.schedule_wrap(vim.notify)(msg, vim.log.levels.ERROR)
+			end
+		end
+
 		M.uproject_engine_install_dir(engine_association, function(install_dir)
 			local engine_dir = vim.fs.joinpath(install_dir, "Engine")
 			local ubt = vim.fs.joinpath(engine_dir, "Binaries", "DotNET", "UnrealBuildTool", "UnrealBuildTool.exe")
+
+			notify_info("generating compile_commands.json")
 
 			vim.uv.spawn(ubt, {
 				args = {
@@ -77,19 +111,25 @@ function M.uproject_reload(dir)
 					'-Target=UnrealEditor Development Win64',
 				},
 			}, function(code, _)
-				local notify_level = vim.log.levels.INFO
 				if code ~= 0 then
-					notify_level = vim.log.levels.ERROR
+					notify_error("failed to reload uproject (exit code " .. code .. ")")
 				else
+					notify_info("copying compile_commands.json to project root")
 					vim.uv.fs_copyfile(
 						vim.fs.joinpath(install_dir, 'compile_commands.json'),
-						vim.fs.joinpath(tostring(vim.fs.dirname(project_path:absolute())), 'compile_commands.json')
+						vim.fs.joinpath(tostring(vim.fs.dirname(project_path:absolute())), 'compile_commands.json'),
+						function(err)
+							if err then
+								notify_error(err)
+							else
+								notify_info("uproject reload done")
+								if fidget_progress ~= nil then
+									fidget_progress:finish()
+								end
+							end
+						end
 					)
 				end
-				vim.schedule_wrap(vim.notify)(
-					"uproject reload done (exit code " .. code .. ")",
-					notify_level
-				)
 			end)
 		end)
 	end
@@ -114,7 +154,7 @@ function M.setup(opts)
 	})
 
 	vim.api.nvim_create_user_command("Uproject", function(opts)
-		if opts.args[1] == "reload" then
+		if opts.args == "reload" then
 			M.uproject_reload(vim.fn.getcwd())
 		end
 	end, { nargs = 1, complete = function() return { "reload" } end })
