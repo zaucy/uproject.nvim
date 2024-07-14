@@ -1,6 +1,64 @@
 local Path = require("plenary.path")
 
 local M = {}
+local commands = {
+	reload = function()
+		M.uproject_reload(vim.fn.getcwd())
+	end,
+	open = function()
+		M.uproject_open(vim.fn.getcwd())
+	end,
+	play = function()
+		M.uproject_play(vim.fn.getcwd())
+	end,
+	build = function()
+		M.uproject_build(vim.fn.getcwd())
+	end,
+}
+
+local function uproject_command(opts)
+	local command = commands[opts.args]
+	if command == nil then
+		return
+	end
+
+	command(opts)
+end
+
+local function select_target(dir)
+
+end
+
+local function make_output_buffer()
+	local bufnr = vim.api.nvim_create_buf(false, true)
+	vim.api.nvim_set_option_value("readonly", true, { buf = bufnr })
+	vim.api.nvim_set_option_value("modified", false, { buf = bufnr })
+	vim.api.nvim_win_set_buf(0, bufnr)
+	-- vim.api.nvim_buf_set_lines(bufnr, 0, -1, true, {})
+	return bufnr
+end
+
+local function append_output_buffer(bufnr, lines)
+	assert(lines ~= nil)
+	assert(#lines > 0)
+	local bufwin = vim.api.nvim_call_function("bufwinid", { bufnr })
+	local was_at_end = false
+	if bufwin ~= nil then
+		local cursor_line = vim.api.nvim_win_get_cursor(bufwin)[1]
+		local buf_line_count = vim.api.nvim_buf_line_count(bufnr)
+		was_at_end = cursor_line == buf_line_count
+	end
+
+	vim.api.nvim_set_option_value("readonly", false, { buf = bufnr })
+	vim.api.nvim_buf_set_lines(bufnr, -1, -1, true, lines)
+	vim.api.nvim_set_option_value("readonly", true, { buf = bufnr })
+	vim.api.nvim_set_option_value("modified", false, { buf = bufnr })
+
+	if bufwin ~= -1 and was_at_end then
+		local buf_line_count = vim.api.nvim_buf_line_count(bufnr)
+		vim.api.nvim_win_set_cursor(bufwin, { buf_line_count, 0 })
+	end
+end
 
 local function str_ends_with(str, suffix)
 	return str:sub(- #suffix) == suffix
@@ -54,13 +112,71 @@ function M.uproject_engine_install_dir(engine_association, cb)
 	end)
 end
 
+function M.uproject_open(dir)
+	local project_path = M.uproject_path(dir)
+	if project_path == nil then
+		return
+	end
+
+	---@diagnostic disable-next-line: redefined-local
+	local project_path = Path:new(project_path)
+
+	local engine_association = M.uproject_engine_association(dir)
+	if engine_association == nil then
+		return
+	end
+
+	M.uproject_engine_install_dir(engine_association, function(install_dir)
+		local engine_dir = vim.fs.joinpath(install_dir, "Engine")
+		local ue = vim.fs.joinpath(
+			engine_dir, "Binaries", "Win64", "UnrealEditor.exe")
+
+		vim.uv.spawn(ue, {
+			args = {
+				project_path:absolute(),
+			},
+		}, function(code, _)
+		end)
+	end)
+end
+
+function M.uproject_play(dir)
+	local project_path = M.uproject_path(dir)
+	if project_path == nil then
+		return
+	end
+
+	---@diagnostic disable-next-line: redefined-local
+	local project_path = Path:new(project_path)
+
+	local engine_association = M.uproject_engine_association(dir)
+	if engine_association == nil then
+		return
+	end
+
+	M.uproject_engine_install_dir(engine_association, function(install_dir)
+		local engine_dir = vim.fs.joinpath(install_dir, "Engine")
+		local ue = vim.fs.joinpath(
+			engine_dir, "Binaries", "Win64", "UnrealEditor.exe")
+
+		vim.uv.spawn(ue, {
+			args = {
+				project_path:absolute(),
+				"-game",
+			},
+		}, function(code, _)
+		end)
+	end)
+end
+
 function M.uproject_reload(dir)
 	local project_path = M.uproject_path(dir)
 	if project_path == nil then
 		return
 	end
 
-	project_path = Path:new(project_path)
+	---@diagnostic disable-next-line: redefined-local
+	local project_path = Path:new(project_path)
 
 	local engine_association = M.uproject_engine_association(dir)
 	if engine_association ~= nil then
@@ -136,13 +252,62 @@ function M.uproject_reload(dir)
 end
 
 function M.uproject_build(dir)
-	local engine_association = M.uproject_engine_association(dir)
-	if engine_association ~= nil then
-		M.uproject_engine_install_dir(engine_association, function(install_dir)
-			local engine_dir = vim.fs.joinpath(install_dir, "Engine")
-			local build_bat = vim.fs.joinpath(engine_dir, "Build", "BatchFiles", "Build.bat")
-		end)
+	local project_path = M.uproject_path(dir)
+	if project_path == nil then
+		return
 	end
+
+	---@diagnostic disable-next-line: redefined-local
+	local project_path = Path:new(project_path)
+
+	local engine_association = M.uproject_engine_association(dir)
+	if engine_association == nil then
+		return
+	end
+	M.uproject_engine_install_dir(engine_association, function(install_dir)
+		local engine_dir = vim.fs.joinpath(install_dir, "Engine")
+		local build_bat = vim.fs.joinpath(
+			engine_dir, "Build", "BatchFiles", "Build.bat")
+
+		local output = nil
+		local output_append = vim.schedule_wrap(function(lines)
+			if output == nil then
+				output = make_output_buffer()
+			end
+
+			append_output_buffer(output, lines)
+		end)
+
+		local stdout = vim.uv.new_pipe()
+		local stderr = vim.uv.new_pipe()
+
+		vim.uv.spawn(build_bat, {
+			stdio = { nil, stdout, stderr },
+			args = {
+				"-Project=" .. project_path:absolute(),
+				"-Target=GrabemEditor Win64 Development",
+				"-LiveCoding",
+				"-LiveCodingModules=" .. engine_dir .. "/Intermediate/LiveCodingModules.json",
+				"-LiveCodingManifest=" .. engine_dir .. "/Intermediate/LiveCoding.json",
+				"-WaitMutex",
+				"-LiveCodingLimit=100",
+				"Win64",
+			},
+		}, function(code, _)
+		end)
+
+		vim.uv.read_start(stdout, function(err, data)
+			if data ~= nil then
+				output_append(vim.split(data, "\r\n", { trimempty = true }))
+			end
+		end)
+
+		vim.uv.read_start(stderr, function(err, data)
+			if data ~= nil then
+				output_append(vim.split(data, "\r\n", { trimempty = true }))
+			end
+		end)
+	end)
 end
 
 function M.setup(opts)
@@ -153,11 +318,12 @@ function M.setup(opts)
 		end,
 	})
 
-	vim.api.nvim_create_user_command("Uproject", function(opts)
-		if opts.args == "reload" then
-			M.uproject_reload(vim.fn.getcwd())
-		end
-	end, { nargs = 1, complete = function() return { "reload" } end })
+	vim.api.nvim_create_user_command("Uproject", uproject_command, {
+		nargs = 1,
+		complete = function()
+			return vim.tbl_keys(commands)
+		end,
+	})
 
 	M.uproject_reload(vim.fn.getcwd())
 end
