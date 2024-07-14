@@ -60,6 +60,42 @@ local function append_output_buffer(bufnr, lines)
 	end
 end
 
+local function spawn_show_output(cmd, args)
+	local output = nil
+	local output_append = vim.schedule_wrap(function(lines)
+		if output == nil then
+			output = make_output_buffer()
+		end
+
+		append_output_buffer(output, lines)
+	end)
+
+	local stdout = vim.uv.new_pipe()
+	local stderr = vim.uv.new_pipe()
+
+	vim.uv.spawn(cmd, {
+		stdio = { nil, stdout, stderr },
+		args = args,
+	}, function(code, _)
+		output_append({
+			"",
+			cmd .. " exited with code " .. code,
+		})
+	end)
+
+	vim.uv.read_start(stdout, function(err, data)
+		if data ~= nil then
+			output_append(vim.split(data, "\r\n", { trimempty = true }))
+		end
+	end)
+
+	vim.uv.read_start(stderr, function(err, data)
+		if data ~= nil then
+			output_append(vim.split(data, "\r\n", { trimempty = true }))
+		end
+	end)
+end
+
 local function str_ends_with(str, suffix)
 	return str:sub(- #suffix) == suffix
 end
@@ -159,13 +195,10 @@ function M.uproject_play(dir)
 		local ue = vim.fs.joinpath(
 			engine_dir, "Binaries", "Win64", "UnrealEditor.exe")
 
-		vim.uv.spawn(ue, {
-			args = {
-				project_path:absolute(),
-				"-game",
-			},
-		}, function(code, _)
-		end)
+		spawn_show_output(ue, {
+			project_path:absolute(),
+			"-game",
+		})
 	end)
 end
 
@@ -216,7 +249,7 @@ function M.uproject_reload(dir)
 			local engine_dir = vim.fs.joinpath(install_dir, "Engine")
 			local ubt = vim.fs.joinpath(engine_dir, "Binaries", "DotNET", "UnrealBuildTool", "UnrealBuildTool.exe")
 
-			notify_info("generating compile_commands.json")
+			notify_info("Generating compile_commands.json")
 
 			vim.uv.spawn(ubt, {
 				args = {
@@ -228,9 +261,9 @@ function M.uproject_reload(dir)
 				},
 			}, function(code, _)
 				if code ~= 0 then
-					notify_error("failed to reload uproject (exit code " .. code .. ")")
+					notify_error("Failed to reload uproject (exit code " .. code .. ")")
 				else
-					notify_info("copying compile_commands.json to project root")
+					notify_info("Copying compile_commands.json to project root")
 					vim.uv.fs_copyfile(
 						vim.fs.joinpath(install_dir, 'compile_commands.json'),
 						vim.fs.joinpath(tostring(vim.fs.dirname(project_path:absolute())), 'compile_commands.json'),
@@ -238,7 +271,7 @@ function M.uproject_reload(dir)
 							if err then
 								notify_error(err)
 							else
-								notify_info("uproject reload done")
+								notify_info("Done")
 								if fidget_progress ~= nil then
 									fidget_progress:finish()
 								end
@@ -269,44 +302,16 @@ function M.uproject_build(dir)
 		local build_bat = vim.fs.joinpath(
 			engine_dir, "Build", "BatchFiles", "Build.bat")
 
-		local output = nil
-		local output_append = vim.schedule_wrap(function(lines)
-			if output == nil then
-				output = make_output_buffer()
-			end
-
-			append_output_buffer(output, lines)
-		end)
-
-		local stdout = vim.uv.new_pipe()
-		local stderr = vim.uv.new_pipe()
-
-		vim.uv.spawn(build_bat, {
-			stdio = { nil, stdout, stderr },
-			args = {
-				"-Project=" .. project_path:absolute(),
-				"-Target=GrabemEditor Win64 Development",
-				"-LiveCoding",
-				"-LiveCodingModules=" .. engine_dir .. "/Intermediate/LiveCodingModules.json",
-				"-LiveCodingManifest=" .. engine_dir .. "/Intermediate/LiveCoding.json",
-				"-WaitMutex",
-				"-LiveCodingLimit=100",
-				"Win64",
-			},
-		}, function(code, _)
-		end)
-
-		vim.uv.read_start(stdout, function(err, data)
-			if data ~= nil then
-				output_append(vim.split(data, "\r\n", { trimempty = true }))
-			end
-		end)
-
-		vim.uv.read_start(stderr, function(err, data)
-			if data ~= nil then
-				output_append(vim.split(data, "\r\n", { trimempty = true }))
-			end
-		end)
+		spawn_show_output(build_bat, {
+			"-Project=" .. project_path:absolute(),
+			"-Target=GrabemEditor Win64 Development",
+			"-LiveCoding",
+			"-LiveCodingModules=" .. engine_dir .. "/Intermediate/LiveCodingModules.json",
+			"-LiveCodingManifest=" .. engine_dir .. "/Intermediate/LiveCoding.json",
+			"-WaitMutex",
+			"-LiveCodingLimit=100",
+			"Win64",
+		})
 	end)
 end
 
