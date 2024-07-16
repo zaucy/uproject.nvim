@@ -25,8 +25,46 @@ local function uproject_command(opts)
 	command(opts)
 end
 
-local function select_target(dir)
+local function select_target(dir, cb)
+	local target_info_path = vim.fs.joinpath(dir, "Intermediate", "TargetInfo.json")
 
+	local project_path = M.uproject_path(dir)
+	if project_path == nil then
+		cb(nil)
+		return
+	end
+
+	---@diagnostic disable-next-line: redefined-local
+	local project_path = Path:new(project_path)
+
+	local engine_association = M.uproject_engine_association(dir)
+	if engine_association == nil then
+		cb(nil)
+		return
+	end
+	M.uproject_engine_install_dir(engine_association, function(install_dir)
+		local engine_dir = vim.fs.joinpath(install_dir, "Engine")
+		local build_bat = vim.fs.joinpath(
+			engine_dir, "Build", "BatchFiles", "Build.bat")
+
+		vim.uv.spawn(build_bat, {
+			args = {
+				"-Mode=QueryTargets",
+				"-Project=" .. project_path:absolute(),
+			},
+		}, function(_, _)
+			vim.schedule(function()
+				local target_info = vim.fn.json_decode(vim.fn.readfile(target_info_path))
+
+				vim.ui.select(target_info.Targets, {
+					prompt = "Select Uproject Target",
+					format_item = function(target)
+						return target.Name .. " (" .. target.Type .. ")"
+					end
+				}, cb)
+			end)
+		end)
+	end)
 end
 
 local function make_output_buffer()
@@ -304,10 +342,16 @@ function M.uproject_build(dir)
 		local build_bat = vim.fs.joinpath(
 			engine_dir, "Build", "BatchFiles", "Build.bat")
 
-		spawn_show_output(build_bat, {
-			"-Project=" .. project_path:absolute(),
-			"-Target=GrabemEditor Win64 Development",
-		})
+		vim.schedule_wrap(select_target)(dir, function(target)
+			if target == nil then
+				return
+			end
+
+			spawn_show_output(build_bat, {
+				"-Project=" .. project_path:absolute(),
+				"-Target=" .. target.Name .. " Win64 Development",
+			})
+		end)
 	end)
 end
 
