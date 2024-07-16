@@ -168,6 +168,8 @@ function M.uproject_open(dir)
 			engine_dir, "Binaries", "Win64", "UnrealEditor.exe")
 
 		vim.uv.spawn(ue, {
+			detached = true,
+			hide = true,
 			args = {
 				project_path:absolute(),
 			},
@@ -305,12 +307,6 @@ function M.uproject_build(dir)
 		spawn_show_output(build_bat, {
 			"-Project=" .. project_path:absolute(),
 			"-Target=GrabemEditor Win64 Development",
-			"-LiveCoding",
-			"-LiveCodingModules=" .. engine_dir .. "/Intermediate/LiveCodingModules.json",
-			"-LiveCodingManifest=" .. engine_dir .. "/Intermediate/LiveCoding.json",
-			"-WaitMutex",
-			"-LiveCodingLimit=100",
-			"Win64",
 		})
 	end)
 end
