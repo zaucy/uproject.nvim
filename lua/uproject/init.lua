@@ -27,44 +27,18 @@ end
 
 local function select_target(dir, cb)
 	local target_info_path = vim.fs.joinpath(dir, "Intermediate", "TargetInfo.json")
+	local target_info = vim.fn.json_decode(vim.fn.readfile(target_info_path))
 
-	local project_path = M.uproject_path(dir)
-	if project_path == nil then
-		cb(nil)
-		return
+	if #target_info.Targets == 1 then
+		cb(target_info.Targets[1])
 	end
 
-	---@diagnostic disable-next-line: redefined-local
-	local project_path = Path:new(project_path)
-
-	local engine_association = M.uproject_engine_association(dir)
-	if engine_association == nil then
-		cb(nil)
-		return
-	end
-	M.uproject_engine_install_dir(engine_association, function(install_dir)
-		local engine_dir = vim.fs.joinpath(install_dir, "Engine")
-		local build_bat = vim.fs.joinpath(
-			engine_dir, "Build", "BatchFiles", "Build.bat")
-
-		vim.uv.spawn(build_bat, {
-			args = {
-				"-Mode=QueryTargets",
-				"-Project=" .. project_path:absolute(),
-			},
-		}, function(_, _)
-			vim.schedule(function()
-				local target_info = vim.fn.json_decode(vim.fn.readfile(target_info_path))
-
-				vim.ui.select(target_info.Targets, {
-					prompt = "Select Uproject Target",
-					format_item = function(target)
-						return target.Name .. " (" .. target.Type .. ")"
-					end
-				}, cb)
-			end)
-		end)
-	end)
+	vim.ui.select(target_info.Targets, {
+		prompt = "Select Uproject Target",
+		format_item = function(target)
+			return target.Name .. " (" .. target.Type .. ")"
+		end
+	}, cb)
 end
 
 local function make_output_buffer()
@@ -288,6 +262,15 @@ function M.uproject_reload(dir)
 		M.uproject_engine_install_dir(engine_association, function(install_dir)
 			local engine_dir = vim.fs.joinpath(install_dir, "Engine")
 			local ubt = vim.fs.joinpath(engine_dir, "Binaries", "DotNET", "UnrealBuildTool", "UnrealBuildTool.exe")
+			local build_bat = vim.fs.joinpath(
+				engine_dir, "Build", "BatchFiles", "Build.bat")
+
+			vim.uv.spawn(build_bat, {
+				args = {
+					"-Mode=QueryTargets",
+					"-Project=" .. project_path:absolute(),
+				},
+			})
 
 			notify_info("Generating compile_commands.json")
 
