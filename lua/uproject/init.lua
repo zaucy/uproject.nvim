@@ -83,8 +83,13 @@ local function select_target(dir, opts, cb)
 	}, cb)
 end
 
-local function make_output_buffer()
+---@param first_line string|nil
+---@return number
+local function make_output_buffer(first_line)
 	local bufnr = vim.api.nvim_create_buf(false, true)
+	if first_line ~= nil then
+		vim.api.nvim_buf_set_lines(bufnr, 0, 1, true, { first_line })
+	end
 	vim.api.nvim_set_option_value("readonly", true, { buf = bufnr })
 	vim.api.nvim_set_option_value("modified", false, { buf = bufnr })
 	vim.api.nvim_win_set_buf(0, bufnr)
@@ -118,6 +123,8 @@ local function append_output_buffer(bufnr, lines)
 			vim.api.nvim_buf_add_highlight(bufnr, 0, "Comment", line_no, col_start, col_end)
 		elseif line:find("error", 0, true) ~= nil then
 			vim.api.nvim_buf_add_highlight(bufnr, 0, "ErrorMsg", line_no, col_start, col_end)
+		elseif line:find("^%[uproject%.nvim%] info:") ~= nil then
+			vim.api.nvim_buf_add_highlight(bufnr, 0, "Comment", line_no, col_start, col_end)
 		end
 	end
 
@@ -142,7 +149,13 @@ local function transform_output_lines(lines, project_root)
 end
 
 local function spawn_show_output(cmd, args, project_root, cb)
-	local output = make_output_buffer()
+	local output = make_output_buffer(
+		vim.fn.shellescape(cmd) .. " " ..
+		vim.fn.join(
+			vim.tbl_map(function(v) return vim.fn.shellescape(v) end, args),
+			" "
+		)
+	)
 	local output_append = vim.schedule_wrap(function(lines)
 		append_output_buffer(output, transform_output_lines(lines, project_root))
 	end)
@@ -295,11 +308,34 @@ function M.uproject_reload(dir, opts)
 		return
 	end
 
+	local output = nil
+
+	if opts.show_output then
+		output = make_output_buffer()
+	end
+
 	local project_root = Path:new(vim.fs.dirname(project_path))
 	---@diagnostic disable-next-line: redefined-local
 	local project_path = Path:new(project_path)
 
+	local output_append = vim.schedule_wrap(function(lines)
+		if output == nil then
+			return
+		end
+
+		append_output_buffer(
+			output,
+			transform_output_lines(lines, project_root)
+		)
+	end)
+
 	local engine_association = M.uproject_engine_association(dir)
+
+	if engine_association == nil then
+		output_append({ "[uproject.nvim] error: cannot find ureal engine association in " .. dir })
+		return
+	end
+
 	if engine_association ~= nil then
 		local has_fidget, fidget = pcall(require, 'fidget')
 		local fidget_progress = nil
@@ -320,6 +356,8 @@ function M.uproject_reload(dir, opts)
 				---@diagnostic disable-next-line: need-check-nil
 				fidget_progress.message = msg
 			end
+
+			output_append({ "[uproject.nvim] info: " .. msg })
 		end
 
 		local function notify_error(msg)
@@ -331,21 +369,11 @@ function M.uproject_reload(dir, opts)
 			else
 				vim.schedule_wrap(vim.notify)(msg, vim.log.levels.ERROR)
 			end
+
+			output_append({ "[uproject.nvim] error: " .. msg })
 		end
 
 		M.uproject_engine_install_dir(engine_association, function(install_dir)
-			local output = nil
-			local output_append = vim.schedule_wrap(function(lines)
-				if output == nil then
-					output = make_output_buffer()
-				end
-
-				append_output_buffer(
-					output,
-					transform_output_lines(lines, project_root)
-				)
-			end)
-
 			local engine_dir = vim.fs.joinpath(install_dir, "Engine")
 			local ubt = vim.fs.joinpath(engine_dir, "Binaries", "DotNET", "UnrealBuildTool", "UnrealBuildTool.exe")
 			local build_bat = vim.fs.joinpath(
