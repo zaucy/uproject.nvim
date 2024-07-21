@@ -46,7 +46,7 @@ local commands = {
 		M.uproject_play(vim.fn.getcwd())
 	end,
 	build = function(opts)
-		local args = parse_fargs(opts.fargs, { "ignore_junk", "type_pattern" })
+		local args = parse_fargs(opts.fargs, { "ignore_junk", "type_pattern", "close_output_on_success" })
 		M.uproject_build(vim.fn.getcwd(), args)
 	end,
 }
@@ -141,13 +141,9 @@ local function transform_output_lines(lines, project_root)
 	end, lines)
 end
 
-local function spawn_show_output(cmd, args, project_root)
-	local output = nil
+local function spawn_show_output(cmd, args, project_root, cb)
+	local output = make_output_buffer()
 	local output_append = vim.schedule_wrap(function(lines)
-		if output == nil then
-			output = make_output_buffer()
-		end
-
 		append_output_buffer(output, transform_output_lines(lines, project_root))
 	end)
 
@@ -162,6 +158,10 @@ local function spawn_show_output(cmd, args, project_root)
 			"",
 			cmd .. " exited with code " .. code,
 		})
+
+		if cb then
+			cb(code)
+		end
 	end)
 
 	vim.uv.read_start(stdout, function(err, data)
@@ -175,6 +175,8 @@ local function spawn_show_output(cmd, args, project_root)
 			output_append(vim.split(data, "\r\n", { trimempty = true }))
 		end
 	end)
+
+	return output
 end
 
 local function str_ends_with(str, suffix)
@@ -414,7 +416,7 @@ function M.uproject_reload(dir, opts)
 end
 
 function M.uproject_build(dir, opts)
-	opts = vim.tbl_extend('force', { ignore_junk = false, type_pattern = nil }, opts)
+	opts = vim.tbl_extend('force', { ignore_junk = false, type_pattern = nil, close_output_on_success = false }, opts)
 	local project_path = M.uproject_path(dir)
 	if project_path == nil then
 		return
@@ -447,7 +449,15 @@ function M.uproject_build(dir, opts)
 				table.insert(args, "-IgnoreJunk")
 			end
 
-			spawn_show_output(build_bat, args, project_root)
+			local output_bufnr = -1
+			local on_spawn_done = function(exit_code)
+				print(vim.inspect(opts))
+				print(exit_code)
+				if opts.close_output_on_success and exit_code == 0 then
+					vim.schedule_wrap(vim.api.nvim_buf_delete)(output_bufnr, { force = true })
+				end
+			end
+			output_bufnr = spawn_show_output(build_bat, args, project_root, on_spawn_done)
 		end)
 	end)
 end
