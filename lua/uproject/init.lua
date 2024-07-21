@@ -51,6 +51,8 @@ local function make_output_buffer()
 	return bufnr
 end
 
+---@param bufnr number
+---@param lines string[]
 local function append_output_buffer(bufnr, lines)
 	assert(lines ~= nil)
 	assert(#lines > 0)
@@ -64,11 +66,25 @@ local function append_output_buffer(bufnr, lines)
 
 	vim.api.nvim_set_option_value("readonly", false, { buf = bufnr })
 	vim.api.nvim_buf_set_lines(bufnr, -1, -1, true, lines)
+
+	local buf_line_count = vim.api.nvim_buf_line_count(bufnr)
+
+	for i, line in ipairs(lines) do
+		local line_no = buf_line_count - i
+		local col_start = 0
+		local col_end = #line
+
+		if line:find("------", 0, true) ~= nil then
+			vim.api.nvim_buf_add_highlight(bufnr, 0, "Comment", line_no, col_start, col_end)
+		elseif line:find("error", 0, true) ~= nil then
+			vim.api.nvim_buf_add_highlight(bufnr, 0, "ErrorMsg", line_no, col_start, col_end)
+		end
+	end
+
 	vim.api.nvim_set_option_value("readonly", true, { buf = bufnr })
 	vim.api.nvim_set_option_value("modified", false, { buf = bufnr })
 
 	if bufwin ~= -1 and was_at_end then
-		local buf_line_count = vim.api.nvim_buf_line_count(bufnr)
 		vim.api.nvim_win_set_cursor(bufwin, { buf_line_count, 0 })
 	end
 end
