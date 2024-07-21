@@ -1,10 +1,43 @@
 local Path = require("plenary.path")
 
 local M = {}
+---@param arg string
+---@param arg_name string
+---@return string|nil
+local function arg_eq_parse(arg, arg_name)
+	local prefix = arg_name .. "="
+	if arg:find("^" .. prefix) ~= nil then
+		return arg:sub(#prefix + 1)
+	end
+
+	return nil
+end
+
+---@param fargs string[]
+---@param valid_args_list string[]
+---@return Map<string, string>
+local function parse_fargs(fargs, valid_args_list)
+	local args_table = {}
+	for i, arg in ipairs(fargs) do
+		for _, valid_arg in ipairs(valid_args_list) do
+			if arg == valid_arg then
+				args_table[valid_arg] = true
+			else
+				local v = arg_eq_parse(arg, valid_arg)
+				if v ~= nil then
+					args_table[valid_arg] = v
+				end
+			end
+		end
+	end
+
+	return args_table
+end
+
 local commands = {
 	reload = function(opts)
-		local show_output = vim.tbl_contains(opts.fargs, "show_output")
-		M.uproject_reload(vim.fn.getcwd(), show_output)
+		local args = parse_fargs(opts.fargs, { "show_output" })
+		M.uproject_reload(vim.fn.getcwd(), args)
 	end,
 	open = function()
 		M.uproject_open(vim.fn.getcwd())
@@ -12,8 +45,9 @@ local commands = {
 	play = function()
 		M.uproject_play(vim.fn.getcwd())
 	end,
-	build = function()
-		M.uproject_build(vim.fn.getcwd())
+	build = function(opts)
+		local args = parse_fargs(opts.fargs, { "ignore_junk", "type_pattern" })
+		M.uproject_build(vim.fn.getcwd(), args)
 	end,
 }
 
@@ -26,15 +60,22 @@ local function uproject_command(opts)
 	command(opts)
 end
 
-local function select_target(dir, cb)
+local function select_target(dir, opts, cb)
+	opts = vim.tbl_extend('force', { type_pattern = ".*" }, opts)
 	local target_info_path = vim.fs.joinpath(dir, "Intermediate", "TargetInfo.json")
 	local target_info = vim.fn.json_decode(vim.fn.readfile(target_info_path))
 
-	if #target_info.Targets == 1 then
-		cb(target_info.Targets[1])
+	local targets = vim.tbl_filter(function(target)
+		local index = target.Type:find(opts.type_pattern)
+		return index ~= nil
+	end, target_info.Targets)
+
+	if #targets == 1 then
+		cb(targets[1])
+		return
 	end
 
-	vim.ui.select(target_info.Targets, {
+	vim.ui.select(targets, {
 		prompt = "Select Uproject Target",
 		format_item = function(target)
 			return target.Name .. " (" .. target.Type .. ")"
@@ -47,7 +88,6 @@ local function make_output_buffer()
 	vim.api.nvim_set_option_value("readonly", true, { buf = bufnr })
 	vim.api.nvim_set_option_value("modified", false, { buf = bufnr })
 	vim.api.nvim_win_set_buf(0, bufnr)
-	-- vim.api.nvim_buf_set_lines(bufnr, 0, -1, true, {})
 	return bufnr
 end
 
@@ -246,7 +286,8 @@ function M.uproject_play(dir)
 	end)
 end
 
-function M.uproject_reload(dir, show_output)
+function M.uproject_reload(dir, opts)
+	opts = vim.tbl_extend('force', { show_output = false }, opts)
 	local project_path = M.uproject_path(dir)
 	if project_path == nil then
 		return
@@ -319,7 +360,7 @@ function M.uproject_reload(dir, show_output)
 
 			local stdio = { nil, nil, nil }
 
-			if show_output then
+			if opts.show_output then
 				stdio[2] = vim.uv.new_pipe()
 				stdio[3] = vim.uv.new_pipe()
 			end
@@ -355,7 +396,7 @@ function M.uproject_reload(dir, show_output)
 				end
 			end)
 
-			if show_output then
+			if opts.show_output then
 				vim.uv.read_start(stdio[2], function(err, data)
 					if data ~= nil then
 						output_append(vim.split(data, "\r\n", { trimempty = true }))
@@ -372,7 +413,8 @@ function M.uproject_reload(dir, show_output)
 	end
 end
 
-function M.uproject_build(dir)
+function M.uproject_build(dir, opts)
+	opts = vim.tbl_extend('force', { ignore_junk = false, type_pattern = nil }, opts)
 	local project_path = M.uproject_path(dir)
 	if project_path == nil then
 		return
@@ -391,15 +433,21 @@ function M.uproject_build(dir)
 		local build_bat = vim.fs.joinpath(
 			engine_dir, "Build", "BatchFiles", "Build.bat")
 
-		vim.schedule_wrap(select_target)(dir, function(target)
+		vim.schedule_wrap(select_target)(dir, { type_pattern = opts.type_pattern }, function(target)
 			if target == nil then
 				return
 			end
 
-			spawn_show_output(build_bat, {
+			local args = {
 				"-Project=" .. project_path:absolute(),
 				"-Target=" .. target.Name .. " Win64 Development",
-			}, project_root)
+			}
+
+			if opts.ignore_junk then
+				table.insert(args, "-IgnoreJunk")
+			end
+
+			spawn_show_output(build_bat, args, project_root)
 		end)
 	end)
 end
@@ -408,7 +456,7 @@ function M.setup(opts)
 	vim.api.nvim_create_autocmd("DirChanged", {
 		pattern = { "global" },
 		callback = function(ev)
-			M.uproject_reload(vim.v.event.cwd)
+			M.uproject_reload(vim.v.event.cwd, {})
 		end,
 	})
 
@@ -419,7 +467,7 @@ function M.setup(opts)
 		end,
 	})
 
-	M.uproject_reload(vim.fn.getcwd())
+	M.uproject_reload(vim.fn.getcwd(), {})
 end
 
 return M
