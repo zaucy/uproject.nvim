@@ -73,14 +73,26 @@ local function append_output_buffer(bufnr, lines)
 	end
 end
 
-local function spawn_show_output(cmd, args)
+
+---@param lines string[]
+---@param project_root Path
+local function transform_output_lines(lines, project_root)
+	---@param line string
+	return vim.tbl_map(function(line)
+		line = string.gsub(line, project_root:absolute() .. "\\", "")
+		line = string.gsub(line, "%((%d+)%)%:", ":%1:")
+		return line
+	end, lines)
+end
+
+local function spawn_show_output(cmd, args, project_root)
 	local output = nil
 	local output_append = vim.schedule_wrap(function(lines)
 		if output == nil then
 			output = make_output_buffer()
 		end
 
-		append_output_buffer(output, lines)
+		append_output_buffer(output, transform_output_lines(lines, project_root))
 	end)
 
 	local stdout = vim.uv.new_pipe()
@@ -197,6 +209,7 @@ function M.uproject_play(dir)
 		return
 	end
 
+	local project_root = Path:new(vim.fs.dirname(project_path))
 	---@diagnostic disable-next-line: redefined-local
 	local project_path = Path:new(project_path)
 
@@ -213,7 +226,7 @@ function M.uproject_play(dir)
 		spawn_show_output(ue, {
 			project_path:absolute(),
 			"-game",
-		})
+		}, project_root)
 	end)
 end
 
@@ -223,6 +236,7 @@ function M.uproject_reload(dir, show_output)
 		return
 	end
 
+	local project_root = Path:new(vim.fs.dirname(project_path))
 	---@diagnostic disable-next-line: redefined-local
 	local project_path = Path:new(project_path)
 
@@ -267,7 +281,10 @@ function M.uproject_reload(dir, show_output)
 					output = make_output_buffer()
 				end
 
-				append_output_buffer(output, lines)
+				append_output_buffer(
+					output,
+					transform_output_lines(lines, project_root)
+				)
 			end)
 
 			local engine_dir = vim.fs.joinpath(install_dir, "Engine")
@@ -345,6 +362,7 @@ function M.uproject_build(dir)
 		return
 	end
 
+	local project_root = Path:new(vim.fs.dirname(project_path))
 	---@diagnostic disable-next-line: redefined-local
 	local project_path = Path:new(project_path)
 
@@ -365,7 +383,7 @@ function M.uproject_build(dir)
 			spawn_show_output(build_bat, {
 				"-Project=" .. project_path:absolute(),
 				"-Target=" .. target.Name .. " Win64 Development",
-			})
+			}, project_root)
 		end)
 	end)
 end
