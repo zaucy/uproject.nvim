@@ -2,8 +2,9 @@ local Path = require("plenary.path")
 
 local M = {}
 local commands = {
-	reload = function()
-		M.uproject_reload(vim.fn.getcwd())
+	reload = function(opts)
+		local show_output = vim.tbl_contains(opts.fargs, "show_output")
+		M.uproject_reload(vim.fn.getcwd(), show_output)
 	end,
 	open = function()
 		M.uproject_open(vim.fn.getcwd())
@@ -17,7 +18,7 @@ local commands = {
 }
 
 local function uproject_command(opts)
-	local command = commands[opts.args]
+	local command = commands[opts.fargs[1]]
 	if command == nil then
 		return
 	end
@@ -216,7 +217,7 @@ function M.uproject_play(dir)
 	end)
 end
 
-function M.uproject_reload(dir)
+function M.uproject_reload(dir, show_output)
 	local project_path = M.uproject_path(dir)
 	if project_path == nil then
 		return
@@ -260,6 +261,15 @@ function M.uproject_reload(dir)
 		end
 
 		M.uproject_engine_install_dir(engine_association, function(install_dir)
+			local output = nil
+			local output_append = vim.schedule_wrap(function(lines)
+				if output == nil then
+					output = make_output_buffer()
+				end
+
+				append_output_buffer(output, lines)
+			end)
+
 			local engine_dir = vim.fs.joinpath(install_dir, "Engine")
 			local ubt = vim.fs.joinpath(engine_dir, "Binaries", "DotNET", "UnrealBuildTool", "UnrealBuildTool.exe")
 			local build_bat = vim.fs.joinpath(
@@ -274,7 +284,15 @@ function M.uproject_reload(dir)
 
 			notify_info("Generating compile_commands.json")
 
+			local stdio = { nil, nil, nil }
+
+			if show_output then
+				stdio[2] = vim.uv.new_pipe()
+				stdio[3] = vim.uv.new_pipe()
+			end
+
 			vim.uv.spawn(ubt, {
+				stdio = stdio,
 				args = {
 					'-mode=GenerateClangDatabase',
 					'-project=' .. project_path:absolute(),
@@ -303,6 +321,20 @@ function M.uproject_reload(dir)
 					)
 				end
 			end)
+
+			if show_output then
+				vim.uv.read_start(stdio[2], function(err, data)
+					if data ~= nil then
+						output_append(vim.split(data, "\r\n", { trimempty = true }))
+					end
+				end)
+
+				vim.uv.read_start(stdio[3], function(err, data)
+					if data ~= nil then
+						output_append(vim.split(data, "\r\n", { trimempty = true }))
+					end
+				end)
+			end
 		end)
 	end
 end
@@ -347,7 +379,7 @@ function M.setup(opts)
 	})
 
 	vim.api.nvim_create_user_command("Uproject", uproject_command, {
-		nargs = 1,
+		nargs = '+',
 		complete = function()
 			return vim.tbl_keys(commands)
 		end,
