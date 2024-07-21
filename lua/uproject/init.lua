@@ -451,8 +451,6 @@ function M.uproject_build(dir, opts)
 
 			local output_bufnr = -1
 			local on_spawn_done = function(exit_code)
-				print(vim.inspect(opts))
-				print(exit_code)
 				if opts.close_output_on_success and exit_code == 0 then
 					vim.schedule_wrap(vim.api.nvim_buf_delete)(output_bufnr, { force = true })
 				end
