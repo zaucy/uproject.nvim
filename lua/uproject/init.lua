@@ -489,6 +489,13 @@ function M.uproject_build(dir, opts)
 end
 
 function M.setup(opts)
+	vim.filetype.add({
+		extension = {
+			uproject = "json",
+			uplugin = "json",
+		},
+	})
+
 	vim.api.nvim_create_autocmd("DirChanged", {
 		pattern = { "global" },
 		callback = function(ev)
