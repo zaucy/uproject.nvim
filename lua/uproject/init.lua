@@ -292,11 +292,12 @@ function M.uproject_play(dir)
 	M.uproject_engine_install_dir(engine_association, function(install_dir)
 		local engine_dir = vim.fs.joinpath(install_dir, "Engine")
 		local ue = vim.fs.joinpath(
-			engine_dir, "Binaries", "Win64", "UnrealEditor.exe")
+			engine_dir, "Binaries", "Win64", "UnrealEditor-Cmd.exe")
 
 		spawn_show_output(ue, {
 			project_path:absolute(),
 			"-game",
+			"-stdout",
 		}, project_root)
 	end)
 end
