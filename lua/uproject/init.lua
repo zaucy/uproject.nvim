@@ -173,7 +173,7 @@ local function spawn_show_output(cmd, args, project_root, cb)
 		})
 
 		if cb then
-			cb(code)
+			vim.schedule_wrap(cb)(code)
 		end
 	end)
 
@@ -232,7 +232,7 @@ function M.uproject_engine_install_dir(engine_association, cb)
 	vim.uv.spawn('reg', spawn_opts, function(_, _)
 		local lines = vim.split(stdout_str, '\r\n', { trimempty = true })
 		local value = vim.split(lines[2], '%s+', { trimempty = true })[3]
-		cb(value)
+		vim.schedule_wrap(cb)(value)
 	end)
 
 	vim.uv.read_start(stdout, function(err, data)
