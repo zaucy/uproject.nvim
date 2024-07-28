@@ -192,17 +192,24 @@ local function spawn_show_output(cmd, args, project_root, cb)
 	return output
 end
 
-local function str_ends_with(str, suffix)
-	return str:sub(- #suffix) == suffix
-end
-
 function M.uproject_path(dir)
 	assert(dir ~= nil, "uproject_path first param must be a directory")
 
-	for entry, _ in vim.fs.dir(dir) do
-		if str_ends_with(entry, ".uproject") then
-			return entry
+	local subdirs = {}
+
+	for name, type in vim.fs.dir(dir) do
+		if type == "file" then
+			if vim.endswith(name, ".uproject") then
+				return vim.fs.normalize(vim.fs.joinpath(dir, name))
+			end
+		elseif type == "directory" then
+			table.insert(subdirs, name)
 		end
+	end
+
+	for _, subdir in ipairs(subdirs) do
+		local p = M.uproject_path(vim.fs.normalize(vim.fs.joinpath(dir, subdir)))
+		if p ~= nil then return p end
 	end
 
 	return nil
@@ -247,8 +254,10 @@ end
 function M.uproject_open(dir)
 	local project_path = M.uproject_path(dir)
 	if project_path == nil then
+		vim.notify("cannot find uproject in " .. dir, vim.log.levels.ERROR)
 		return
 	end
+	dir = vim.fs.dirname(project_path)
 
 	---@diagnostic disable-next-line: redefined-local
 	local project_path = Path:new(project_path)
@@ -277,8 +286,10 @@ end
 function M.uproject_play(dir)
 	local project_path = M.uproject_path(dir)
 	if project_path == nil then
+		vim.notify("cannot find uproject in " .. dir, vim.log.levels.ERROR)
 		return
 	end
+	dir = vim.fs.dirname(project_path)
 
 	local project_root = Path:new(vim.fs.dirname(project_path))
 	---@diagnostic disable-next-line: redefined-local
@@ -306,8 +317,12 @@ function M.uproject_reload(dir, opts)
 	opts = vim.tbl_extend('force', { show_output = false }, opts)
 	local project_path = M.uproject_path(dir)
 	if project_path == nil then
+		if opts.show_output then
+			vim.notify("cannot find uproject in " .. dir, vim.log.levels.ERROR)
+		end
 		return
 	end
+	dir = vim.fs.dirname(project_path)
 
 	local output = nil
 
@@ -448,8 +463,10 @@ function M.uproject_build(dir, opts)
 	opts = vim.tbl_extend('force', { ignore_junk = false, type_pattern = nil, close_output_on_success = false }, opts)
 	local project_path = M.uproject_path(dir)
 	if project_path == nil then
+		vim.notify("cannot find uproject in " .. dir, vim.log.levels.ERROR)
 		return
 	end
+	dir = vim.fs.dirname(project_path)
 
 	local project_root = Path:new(vim.fs.dirname(project_path))
 	---@diagnostic disable-next-line: redefined-local
