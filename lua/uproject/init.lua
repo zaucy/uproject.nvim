@@ -214,7 +214,6 @@ function M.uproject_path(dir, max_search_depth)
 	end
 
 	if max_search_depth > 0 then
-		print("searching " .. dir .. " subdirs")
 		for _, subdir in ipairs(subdirs) do
 			local p = M.uproject_path(vim.fs.normalize(vim.fs.joinpath(dir, subdir)), max_search_depth - 1)
 			if p ~= nil then return p end
