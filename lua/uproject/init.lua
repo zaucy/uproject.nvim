@@ -96,6 +96,26 @@ local function make_output_buffer(first_line)
 	return bufnr
 end
 
+---@param line string
+---@return boolean
+local function is_error_line(line)
+	return false
+		or line:find("error", 0, true) ~= nil
+		or vim.startswith(line, "Unable to instantiate module")
+end
+
+local function is_comment_line(line)
+	return false
+		or vim.startswith(line, "(")
+		or line:find("------", 0, true) ~= nil
+		or line:find("^%[uproject%.nvim%] info:") ~= nil
+end
+
+local function is_warn_line(line)
+	return false
+		or line:find("warning", 0, true) ~= nil
+end
+
 ---@param bufnr number
 ---@param lines string[]
 local function append_output_buffer(bufnr, lines)
@@ -119,12 +139,12 @@ local function append_output_buffer(bufnr, lines)
 		local col_start = 0
 		local col_end = #line
 
-		if line:find("------", 0, true) ~= nil then
-			vim.api.nvim_buf_add_highlight(bufnr, 0, "Comment", line_no, col_start, col_end)
-		elseif line:find("error", 0, true) ~= nil then
+		if is_error_line(line) then
 			vim.api.nvim_buf_add_highlight(bufnr, 0, "ErrorMsg", line_no, col_start, col_end)
-		elseif line:find("^%[uproject%.nvim%] info:") ~= nil then
+		elseif is_comment_line(line) then
 			vim.api.nvim_buf_add_highlight(bufnr, 0, "Comment", line_no, col_start, col_end)
+		elseif is_warn_line(line) then
+			vim.api.nvim_buf_add_highlight(bufnr, 0, "WarningMsg", line_no, col_start, col_end)
 		end
 	end
 
@@ -233,7 +253,7 @@ function M.uproject_engine_association(dir)
 	return info["EngineAssociation"]
 end
 
-function M.uproject_engine_install_dir(engine_association, cb)
+function M.unreal_engine_install_dir(engine_association, cb)
 	local stdout = vim.uv.new_pipe()
 	local stdout_str = ""
 	local spawn_opts = {
@@ -275,7 +295,7 @@ function M.uproject_open(dir)
 		return
 	end
 
-	M.uproject_engine_install_dir(engine_association, function(install_dir)
+	M.unreal_engine_install_dir(engine_association, function(install_dir)
 		local engine_dir = vim.fs.joinpath(install_dir, "Engine")
 		local ue = vim.fs.joinpath(
 			engine_dir, "Binaries", "Win64", "UnrealEditor.exe")
@@ -308,7 +328,7 @@ function M.uproject_play(dir)
 		return
 	end
 
-	M.uproject_engine_install_dir(engine_association, function(install_dir)
+	M.unreal_engine_install_dir(engine_association, function(install_dir)
 		local engine_dir = vim.fs.joinpath(install_dir, "Engine")
 		local ue = vim.fs.joinpath(
 			engine_dir, "Binaries", "Win64", "UnrealEditor-Cmd.exe")
@@ -397,7 +417,7 @@ function M.uproject_reload(dir, opts)
 			output_append({ "[uproject.nvim] error: " .. msg })
 		end
 
-		M.uproject_engine_install_dir(engine_association, function(install_dir)
+		M.unreal_engine_install_dir(engine_association, function(install_dir)
 			local engine_dir = vim.fs.joinpath(install_dir, "Engine")
 			local ubt = vim.fs.joinpath(engine_dir, "Binaries", "DotNET", "UnrealBuildTool", "UnrealBuildTool.exe")
 			local build_bat = vim.fs.joinpath(
@@ -484,7 +504,7 @@ function M.uproject_build(dir, opts)
 	if engine_association == nil then
 		return
 	end
-	M.uproject_engine_install_dir(engine_association, function(install_dir)
+	M.unreal_engine_install_dir(engine_association, function(install_dir)
 		local engine_dir = vim.fs.joinpath(install_dir, "Engine")
 		local build_bat = vim.fs.joinpath(
 			engine_dir, "Build", "BatchFiles", "Build.bat")
