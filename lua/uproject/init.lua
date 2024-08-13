@@ -46,8 +46,12 @@ local commands = {
 		M.uproject_play(vim.fn.getcwd())
 	end,
 	build = function(opts)
-		local args = parse_fargs(opts.fargs, { "ignore_junk", "type_pattern", "close_output_on_success" })
+		local args = parse_fargs(opts.fargs, { "wait", "ignore_junk", "type_pattern", "close_output_on_success" })
 		M.uproject_build(vim.fn.getcwd(), args)
+	end,
+	build_plugins = function(opts)
+		local args = parse_fargs(opts.fargs, { "wait", "ignore_junk", "type_pattern", "close_output_on_success" })
+		M.uproject_build_plugins(vim.fn.getcwd(), args)
 	end,
 }
 
@@ -69,6 +73,16 @@ local function select_target(dir, opts, cb)
 		local index = target.Type:find(opts.type_pattern)
 		return index ~= nil
 	end, target_info.Targets)
+
+	if #targets == 0 then
+		if opts.type_pattern then
+			vim.notify("no uproject targets with type pattern '" .. opts.type_pattern .. "' found in " .. dir,
+				vim.log.levels.ERROR)
+		else
+			vim.notify("no uproject targets found in " .. dir, vim.log.levels.ERROR)
+		end
+		return
+	end
 
 	if #targets == 1 then
 		cb(targets[1])
@@ -123,7 +137,7 @@ local function append_output_buffer(bufnr, lines)
 	assert(#lines > 0)
 	local bufwin = vim.api.nvim_call_function("bufwinid", { bufnr })
 	local was_at_end = false
-	if bufwin ~= nil then
+	if bufwin ~= nil and bufwin ~= -1 then
 		local cursor_line = vim.api.nvim_win_get_cursor(bufwin)[1]
 		local buf_line_count = vim.api.nvim_buf_line_count(bufnr)
 		was_at_end = cursor_line == buf_line_count
@@ -341,6 +355,29 @@ function M.uproject_play(dir)
 	end)
 end
 
+function M.uproject_plugin_paths(dir, cb)
+	local project_path = M.uproject_path(dir)
+	if project_path == nil then
+		vim.notify("cannot find uproject in " .. dir, vim.log.levels.ERROR)
+		cb({})
+		return
+	end
+	dir = vim.fs.dirname(project_path)
+
+	local plugins_dir = vim.fs.joinpath(dir, "Plugins")
+	local plugin_dirs = vim.fn.readdir(vim.fs.joinpath(dir, "Plugins"))
+	local plugins = {}
+	for _, plugin_dir in ipairs(plugin_dirs) do
+		local plugin_file = vim.fs.joinpath(plugins_dir, vim.fs.basename(plugin_dir),
+			vim.fs.basename(plugin_dir) .. ".uplugin")
+		if vim.fn.exists(plugin_file) then
+			table.insert(plugins, plugin_file)
+		end
+	end
+
+	cb(plugins)
+end
+
 function M.uproject_reload(dir, opts)
 	opts = vim.tbl_extend('force', { show_output = false }, opts)
 	local project_path = M.uproject_path(dir)
@@ -362,6 +399,17 @@ function M.uproject_reload(dir, opts)
 	---@diagnostic disable-next-line: redefined-local
 	local project_path = Path:new(project_path)
 
+	local output_append_immediate = function(lines)
+		if output == nil then
+			return
+		end
+
+		append_output_buffer(
+			output,
+			transform_output_lines(lines, project_root)
+		)
+	end
+
 	local output_append = vim.schedule_wrap(function(lines)
 		if output == nil then
 			return
@@ -372,6 +420,7 @@ function M.uproject_reload(dir, opts)
 			transform_output_lines(lines, project_root)
 		)
 	end)
+
 
 	local engine_association = M.uproject_engine_association(dir)
 
@@ -395,13 +444,17 @@ function M.uproject_reload(dir, opts)
 			})
 		end
 
-		local function notify_info(msg)
+		local function notify_info(msg, immediate)
 			if has_fidget then
 				---@diagnostic disable-next-line: need-check-nil
 				fidget_progress.message = msg
 			end
 
-			output_append({ "[uproject.nvim] info: " .. msg })
+			if immediate then
+				output_append_immediate({ "[uproject.nvim] info: " .. msg })
+			else
+				output_append({ "[uproject.nvim] info: " .. msg })
+			end
 		end
 
 		local function notify_error(msg)
@@ -423,72 +476,96 @@ function M.uproject_reload(dir, opts)
 			local build_bat = vim.fs.joinpath(
 				engine_dir, "Build", "BatchFiles", "Build.bat")
 
-			vim.uv.spawn(build_bat, {
-				args = {
-					"-Mode=QueryTargets",
-					"-Project=" .. project_path:absolute(),
-				},
-			})
-
-			notify_info("Generating compile_commands.json")
+			local uat_bat = vim.fs.joinpath(
+				engine_dir, "Build", "BatchFiles", "RunUAT.bat")
 
 			local stdio = { nil, nil, nil }
 
-			if opts.show_output then
-				stdio[2] = vim.uv.new_pipe()
-				stdio[3] = vim.uv.new_pipe()
-			end
-
-			vim.uv.spawn(ubt, {
-				stdio = stdio,
-				args = {
-					'-mode=GenerateClangDatabase',
-					'-project=' .. project_path:absolute(),
-					'-game',
-					'-engine',
-					'-Target=UnrealEditor Development Win64',
-				},
-			}, function(code, _)
-				if code ~= 0 then
-					notify_error("Failed to reload uproject (exit code " .. code .. ")")
-				else
-					notify_info("Copying compile_commands.json to project root")
-					vim.uv.fs_copyfile(
-						vim.fs.joinpath(install_dir, 'compile_commands.json'),
-						vim.fs.joinpath(tostring(vim.fs.dirname(project_path:absolute())), 'compile_commands.json'),
-						function(err)
-							if err then
-								notify_error(err)
-							else
-								notify_info("Done")
-								if fidget_progress ~= nil then
-									fidget_progress:finish()
+			local steps = {
+				function(step_done)
+					notify_info("Querying project targets", true)
+					vim.uv.spawn(build_bat, {
+						stdio = stdio,
+						args = {
+							"-Mode=QueryTargets",
+							"-Project=" .. project_path:absolute(),
+						},
+					}, step_done)
+				end,
+				function(step_done)
+					notify_info("Generating compile_commands.json", true)
+					vim.uv.spawn(ubt, {
+						stdio = stdio,
+						args = {
+							'-mode=GenerateClangDatabase',
+							'-project=' .. project_path:absolute(),
+							'-game',
+							'-engine',
+							'-Target=UnrealEditor Development Win64',
+						},
+					}, function(code, _)
+						if code ~= 0 then
+							notify_error("Failed to reload uproject (exit code " .. code .. ")")
+						else
+							notify_info("Copying compile_commands.json to project root")
+							vim.uv.fs_copyfile(
+								vim.fs.joinpath(install_dir, 'compile_commands.json'),
+								vim.fs.joinpath(tostring(vim.fs.dirname(project_path:absolute())),
+									'compile_commands.json'),
+								function(err)
+									if err then
+										notify_error(err)
+									else
+										notify_info("Done")
+										if fidget_progress ~= nil then
+											fidget_progress:finish()
+										end
+									end
 								end
-							end
+							)
 						end
-					)
+						step_done()
+					end)
 				end
-			end)
+			}
 
-			if opts.show_output then
-				vim.uv.read_start(stdio[2], function(err, data)
-					if data ~= nil then
-						output_append(vim.split(data, "\r\n", { trimempty = true }))
-					end
-				end)
+			local current_step_index = 1
+			local function do_step()
+				if opts.show_output then
+					stdio[2] = vim.uv.new_pipe()
+					stdio[3] = vim.uv.new_pipe()
+				end
 
-				vim.uv.read_start(stdio[3], function(err, data)
-					if data ~= nil then
-						output_append(vim.split(data, "\r\n", { trimempty = true }))
+				steps[current_step_index](vim.schedule_wrap(function()
+					if opts.show_output then
+						vim.uv.read_start(stdio[2], function(err, data)
+							if data ~= nil then
+								output_append(vim.split(data, "\r\n", { trimempty = true }))
+							end
+						end)
+
+						vim.uv.read_start(stdio[3], function(err, data)
+							if data ~= nil then
+								output_append(vim.split(data, "\r\n", { trimempty = true }))
+							end
+						end)
 					end
-				end)
+
+					current_step_index = current_step_index + 1
+					if steps[current_step_index] ~= nil then
+						do_step()
+					end
+				end))
 			end
+
+			do_step()
 		end)
 	end
 end
 
 function M.uproject_build(dir, opts)
-	opts = vim.tbl_extend('force', { ignore_junk = false, type_pattern = nil, close_output_on_success = false }, opts)
+	opts = vim.tbl_extend('force',
+		{ ignore_junk = false, type_pattern = nil, close_output_on_success = false, wait = false }, opts)
 	local project_path = M.uproject_path(dir)
 	if project_path == nil then
 		vim.notify("cannot find uproject in " .. dir, vim.log.levels.ERROR)
@@ -519,6 +596,10 @@ function M.uproject_build(dir, opts)
 				"-Target=" .. target.Name .. " Win64 Development",
 			}
 
+			if opts.wait then
+				table.insert(args, "-WaitMutex")
+			end
+
 			if opts.ignore_junk then
 				table.insert(args, "-IgnoreJunk")
 			end
@@ -530,6 +611,60 @@ function M.uproject_build(dir, opts)
 				end
 			end
 			output_bufnr = spawn_show_output(build_bat, args, project_root, on_spawn_done)
+		end)
+	end)
+end
+
+function M.uproject_build_plugins(dir, opts)
+	opts = vim.tbl_extend('force',
+		{ ignore_junk = false, type_pattern = nil, close_output_on_success = false, wait = false }, opts)
+	local project_path = M.uproject_path(dir)
+	if project_path == nil then
+		vim.notify("cannot find uproject in " .. dir, vim.log.levels.ERROR)
+		return
+	end
+	dir = vim.fs.dirname(project_path)
+
+	local project_root = Path:new(vim.fs.dirname(project_path))
+	---@diagnostic disable-next-line: redefined-local
+	local project_path = Path:new(project_path)
+
+	local engine_association = M.uproject_engine_association(dir)
+	if engine_association == nil then
+		return
+	end
+	M.unreal_engine_install_dir(engine_association, function(install_dir)
+		local engine_dir = vim.fs.joinpath(install_dir, "Engine")
+		local build_bat = vim.fs.joinpath(
+			engine_dir, "Build", "BatchFiles", "Build.bat")
+
+
+		vim.schedule_wrap(select_target)(dir, { type_pattern = opts.type_pattern }, function(target)
+			M.uproject_plugin_paths(dir, function(plugins)
+				for _, plugin in ipairs(plugins) do
+					local plugin_info = vim.fn.json_decode(vim.fn.readfile(plugin))
+					local args = {
+						"-Project=" .. project_path:absolute(),
+						"-Target=" .. target.Name .. " Win64 Development",
+					}
+
+					if opts.wait then
+						table.insert(args, "-WaitMutex")
+					end
+
+					for _, mod in ipairs(plugin_info["Modules"]) do
+						table.insert(args, "-Module=" .. mod["Name"])
+					end
+
+					local output_bufnr = -1
+					local on_spawn_done = function(exit_code)
+						if opts.close_output_on_success and exit_code == 0 then
+							vim.schedule_wrap(vim.api.nvim_buf_delete)(output_bufnr, { force = true })
+						end
+					end
+					output_bufnr = spawn_show_output(build_bat, args, project_root, on_spawn_done)
+				end
+			end)
 		end)
 	end)
 end
