@@ -39,11 +39,13 @@ local commands = {
 		local args = parse_fargs(opts.fargs, { "show_output" })
 		M.uproject_reload(vim.fn.getcwd(), args)
 	end,
-	open = function()
-		M.uproject_open(vim.fn.getcwd())
+	open = function(opts)
+		local args = parse_fargs(opts.fargs, { "log_cmds" })
+		M.uproject_open(vim.fn.getcwd(), args)
 	end,
-	play = function()
-		M.uproject_play(vim.fn.getcwd())
+	play = function(opts)
+		local args = parse_fargs(opts.fargs, { "log_cmds" })
+		M.uproject_play(vim.fn.getcwd(), args)
 	end,
 	build = function(opts)
 		local args = parse_fargs(opts.fargs, { "wait", "ignore_junk", "type_pattern", "close_output_on_success" })
@@ -115,6 +117,7 @@ end
 local function is_error_line(line)
 	return false
 		or line:find("error", 0, true) ~= nil
+		or line:find("Error:", 0, true) ~= nil
 		or vim.startswith(line, "Unable to instantiate module")
 end
 
@@ -128,6 +131,7 @@ end
 local function is_warn_line(line)
 	return false
 		or line:find("warning", 0, true) ~= nil
+		or line:find("Warning:", 0, true) ~= nil
 end
 
 ---@param bufnr number
@@ -293,7 +297,8 @@ function M.unreal_engine_install_dir(engine_association, cb)
 	end)
 end
 
-function M.uproject_open(dir)
+function M.uproject_open(dir, opts)
+	opts = vim.tbl_extend('force', {}, opts)
 	local project_path = M.uproject_path(dir)
 	if project_path == nil then
 		vim.notify("cannot find uproject in " .. dir, vim.log.levels.ERROR)
@@ -314,18 +319,25 @@ function M.uproject_open(dir)
 		local ue = vim.fs.joinpath(
 			engine_dir, "Binaries", "Win64", "UnrealEditor.exe")
 
+		local args = {
+			project_path:absolute(),
+		}
+
+		if opts.log_cmds then
+			table.insert(args, "-LogCmds=" .. opts.log_cmds)
+		end
+
 		vim.uv.spawn(ue, {
 			detached = true,
 			hide = true,
-			args = {
-				project_path:absolute(),
-			},
+			args = args,
 		}, function(code, _)
 		end)
 	end)
 end
 
-function M.uproject_play(dir)
+function M.uproject_play(dir, opts)
+	opts = vim.tbl_extend('force', {}, opts)
 	local project_path = M.uproject_path(dir)
 	if project_path == nil then
 		vim.notify("cannot find uproject in " .. dir, vim.log.levels.ERROR)
@@ -342,16 +354,23 @@ function M.uproject_play(dir)
 		return
 	end
 
+	local args = {
+		project_path:absolute(),
+		"-Stdout",
+		"-FullStdOutLogOutput",
+		"-Game",
+	}
+
+	if opts.log_cmds then
+		table.insert(args, "-LogCmds=" .. opts.log_cmds)
+	end
+
 	M.unreal_engine_install_dir(engine_association, function(install_dir)
 		local engine_dir = vim.fs.joinpath(install_dir, "Engine")
 		local ue = vim.fs.joinpath(
 			engine_dir, "Binaries", "Win64", "UnrealEditor-Cmd.exe")
 
-		spawn_show_output(ue, {
-			project_path:absolute(),
-			"-game",
-			"-stdout",
-		}, project_root)
+		spawn_show_output(ue, args, project_root)
 	end)
 end
 
