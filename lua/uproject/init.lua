@@ -705,6 +705,7 @@ function M.setup(opts)
 
 	vim.api.nvim_create_user_command("Uproject", uproject_command, {
 		nargs = '+',
+		desc = "Build, play or open an Unreal project",
 		complete = function()
 			return vim.tbl_keys(commands)
 		end,
