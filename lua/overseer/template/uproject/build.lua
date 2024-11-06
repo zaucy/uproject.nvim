@@ -52,7 +52,7 @@ return {
 								"Android",
 							},
 						},
-						ConfigState = {
+						Config = {
 							type = "enum",
 							describe =
 							"https://dev.epicgames.com/documentation/en-us/unreal-engine/compiling-game-projects-in-unreal-engine-using-cplusplus",
@@ -65,25 +65,12 @@ return {
 								"Test",
 							},
 						},
-						ConfigTarget = {
-							type = "enum",
-							describe =
-							"https://dev.epicgames.com/documentation/en-us/unreal-engine/compiling-game-projects-in-unreal-engine-using-cplusplus",
-							default = "Editor",
-							choices = {
-								"Game",
-								"Editor",
-								"Client",
-								"Server",
-							},
-						},
 					},
 					builder = function(params)
 						local target_options = {
 							target.Name,
 							params.Platform,
-							params.ConfigState,
-							params.ConfigTarget,
+							params.Config,
 						}
 
 						return {
