@@ -230,35 +230,18 @@ local function spawn_show_output(cmd, args, project_root, cb)
 	return output
 end
 
-function M.uproject_path(dir, max_search_depth)
+function M.uproject_path(dir)
 	assert(dir ~= nil, "uproject_path first param must be a directory")
-
-	if max_search_depth == nil then
-		max_search_depth = 3
+	local matcher = function(name) return name:match('%.uproject$') ~= nil end
+	local root = vim.fs.root(dir, matcher)
+	if not root then
+		return nil, nil
 	end
-
-	local subdirs = {}
-
-	for name, type in vim.fs.dir(dir) do
-		if not vim.startswith(name, ".") then
-			if type == "file" then
-				if vim.endswith(name, ".uproject") then
-					return vim.fs.normalize(vim.fs.joinpath(dir, name))
-				end
-			elseif type == "directory" then
-				table.insert(subdirs, name)
-			end
-		end
+	local path = vim.fs.find(matcher, { path = root, type = 'file' })
+	if #path == 1 then
+		return path[1], root
 	end
-
-	if max_search_depth > 0 then
-		for _, subdir in ipairs(subdirs) do
-			local p = M.uproject_path(vim.fs.normalize(vim.fs.joinpath(dir, subdir)), max_search_depth - 1)
-			if p ~= nil then return p end
-		end
-	end
-
-	return nil
+	return nil, nil
 end
 
 function M.uproject_engine_association(dir)
