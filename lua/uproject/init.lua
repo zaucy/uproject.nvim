@@ -44,7 +44,7 @@ local commands = {
 		M.uproject_open(vim.fn.getcwd(), args)
 	end,
 	play = function(opts)
-		local args = parse_fargs(opts.fargs, { "log_cmds" })
+		local args = parse_fargs(opts.fargs, { "log_cmds", "debug" })
 		M.uproject_play(vim.fn.getcwd(), args)
 	end,
 	build = function(opts)
@@ -352,8 +352,13 @@ function M.uproject_play(dir, opts)
 		local engine_dir = vim.fs.joinpath(install_dir, "Engine")
 		local ue = vim.fs.joinpath(
 			engine_dir, "Binaries", "Win64", "UnrealEditor-Cmd.exe")
-
-		spawn_show_output(ue, args, project_root)
+		if opts.debug then
+			table.insert(args, 1, ue)
+			table.insert(args, 1, "launch")
+			spawn_show_output("dbg", args, project_root)
+		else
+			spawn_show_output(ue, args, project_root)
+		end
 	end)
 end
 
