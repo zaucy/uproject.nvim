@@ -48,7 +48,7 @@ local commands = {
 		M.uproject_play(vim.fn.getcwd(), args)
 	end,
 	build = function(opts)
-		local args = parse_fargs(opts.fargs, { "wait", "ignore_junk", "type_pattern", "close_output_on_success" })
+		local args = parse_fargs(opts.fargs, { "wait", "ignore_junk", "type_pattern", "close_output_on_success", "open" })
 		M.uproject_build(vim.fn.getcwd(), args)
 	end,
 	build_plugins = function(opts)
@@ -385,6 +385,136 @@ function M.uproject_plugin_paths(dir, cb)
 	cb(plugins)
 end
 
+function M.get_ubt(dir, cb)
+	local project_path = M.uproject_path(dir)
+	if project_path == nil then
+		cb(nil)
+		return
+	end
+
+	dir = vim.fs.dirname(project_path)
+	local engine_association = M.uproject_engine_association(dir)
+	if engine_association == nil then
+		cb(nil)
+		return
+	end
+
+	M.unreal_engine_install_dir(engine_association, function(install_dir)
+		local engine_dir = vim.fs.joinpath(install_dir, "Engine")
+		local ubt = vim.fs.joinpath(engine_dir, "Binaries", "DotNET", "UnrealBuildTool", "UnrealBuildTool.exe")
+		cb(ubt)
+	end)
+end
+
+function M.get_project_engine_info(dir, cb)
+	local project_path = M.uproject_path(dir)
+	if project_path == nil then
+		cb(nil)
+		return
+	end
+
+	dir = vim.fs.dirname(project_path)
+	local engine_association = M.uproject_engine_association(dir)
+	if engine_association == nil then
+		cb(nil)
+		return
+	end
+
+	M.unreal_engine_install_dir(engine_association, function(install_dir)
+		cb({
+			engine_association = engine_association,
+			install_dir = install_dir,
+		})
+	end)
+end
+
+local function collect_public_headers(dir)
+	local all_headers = {}
+
+	for type, subdir in vim.fs.dir(dir, { depth = nil }) do
+		if type == "directory" then
+			local public_dir = vim.fs.joinpath(subdir, "Public")
+			vim.list_extend(
+				all_headers,
+				vim.fs.find("*.h", { type = "file", path = public_dir, limit = math.huge })
+			)
+		end
+	end
+
+	return all_headers
+end
+
+function M.get_unreal_headers(dir, cb)
+	M.get_project_engine_info(dir, function(info)
+		if info == nil then
+			cb(nil)
+			return
+		end
+
+		local engine_dir = vim.fs.joinpath(info.install_dir, "Engine")
+		local source_dir = vim.fs.joinpath(engine_dir, "Source")
+
+		local all_headers = {}
+
+		vim.list_extend(
+			all_headers,
+			collect_public_headers(vim.fs.joinpath(source_dir, "Developer"))
+		)
+
+		vim.list_extend(
+			all_headers,
+			collect_public_headers(vim.fs.joinpath(source_dir, "Editor"))
+		)
+
+		vim.list_extend(
+			all_headers,
+			collect_public_headers(vim.fs.joinpath(source_dir, "Runtime"))
+		)
+
+		-- TODO: plugins
+		local plugins_dir = vim.fs.joinpath(engine_dir, "Plugins")
+		cb(all_headers)
+	end)
+end
+
+function M.get_unreal_modules(dir, cb)
+	M.get_ubt(dir, function(ubt)
+		local stdio = { nil, vim.uv.new_pipe(), vim.uv.new_pipe() }
+		local project_path = Path:new(M.uproject_path(dir))
+
+		vim.uv.spawn(ubt, {
+			stdio = stdio,
+			args = {
+				'-Mode=Query',
+				-- '-RulesType=Module',
+				'-project=' .. project_path:absolute(),
+				'-stdout',
+				-- '-game',
+				-- '-engine',
+				-- '-Target=UnrealEditor Development Win64',
+			},
+		}, function(code, _)
+			vim.notify("end exit code=" .. tostring(code))
+		end)
+
+		vim.uv.read_start(stdio[2], function(err, data)
+			if data ~= nil then
+				vim.schedule(function()
+					vim.notify(data)
+				end)
+			end
+		end)
+
+		vim.uv.read_start(stdio[3], function(err, data)
+			if data ~= nil then
+				vim.schedule(function()
+					vim.notify(data)
+				end)
+			end
+		end)
+	end)
+end
+
 function M.uproject_reload(dir, opts)
 	opts = vim.tbl_extend('force', { show_output = false }, opts)
 	local project_path = M.uproject_path(dir)
@@ -572,7 +702,7 @@ end
 
 function M.uproject_build(dir, opts)
 	opts = vim.tbl_extend('force',
-		{ ignore_junk = false, type_pattern = nil, close_output_on_success = false, wait = false }, opts)
+		{ ignore_junk = false, type_pattern = nil, close_output_on_success = false, wait = false, open = false }, opts)
 	local project_path = M.uproject_path(dir)
 	if project_path == nil then
 		vim.notify("cannot find uproject in " .. dir, vim.log.levels.ERROR)
@@ -615,6 +745,10 @@ function M.uproject_build(dir, opts)
 			local on_spawn_done = function(exit_code)
 				if opts.close_output_on_success and exit_code == 0 then
 					vim.schedule_wrap(vim.api.nvim_buf_delete)(output_bufnr, { force = true })
+				end
+
+				if opts.open then
+					M.uproject_open(dir, {})
 				end
 			end
 			output_bufnr = spawn_show_output(build_bat, args, project_root, on_spawn_done)
