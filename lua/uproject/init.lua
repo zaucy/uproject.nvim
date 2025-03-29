@@ -613,6 +613,10 @@ function M.uproject_reload(dir, opts)
 		end
 
 		M.unreal_engine_install_dir(engine_association, function(install_dir)
+			if not install_dir then
+				notify_error("Cannot find install directory for Unreal Engine " .. engine_association)
+				return
+			end
 			local engine_dir = vim.fs.joinpath(install_dir, "Engine")
 			local ubt = vim.fs.joinpath(engine_dir, "Binaries", "DotNET", "UnrealBuildTool", "UnrealBuildTool.exe")
 			local build_bat = vim.fs.joinpath(
