@@ -267,6 +267,11 @@ function M.unreal_engine_install_dir(engine_association, cb)
 	}
 	vim.uv.spawn('reg', spawn_opts, function(_, _)
 		local lines = vim.split(stdout_str, '\r\n', { trimempty = true })
+		if #lines == 0 then
+			vim.notify("cannot find unreal " .. engine_association .. " install directory", vim.log.levels.ERROR)
+			vim.schedule_wrap(cb)(nil)
+			return
+		end
 		local value = vim.split(lines[2], '%s+', { trimempty = true })[3]
 		vim.schedule_wrap(cb)(value)
 	end)
@@ -719,6 +724,10 @@ function M.uproject_build(dir, opts)
 		return
 	end
 	M.unreal_engine_install_dir(engine_association, function(install_dir)
+		if not install_dir then
+			return
+		end
+
 		local engine_dir = vim.fs.joinpath(install_dir, "Engine")
 		local build_bat = vim.fs.joinpath(
 			engine_dir, "Build", "BatchFiles", "Build.bat")
@@ -775,6 +784,9 @@ function M.uproject_build_plugins(dir, opts)
 		return
 	end
 	M.unreal_engine_install_dir(engine_association, function(install_dir)
+		if not install_dir then
+			return
+		end
 		local engine_dir = vim.fs.joinpath(install_dir, "Engine")
 		local build_bat = vim.fs.joinpath(
 			engine_dir, "Build", "BatchFiles", "Build.bat")
