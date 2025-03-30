@@ -217,13 +217,19 @@ local function spawn_show_output(cmd, args, project_root, cb)
 
 	vim.uv.read_start(stdout, function(err, data)
 		if data ~= nil then
-			output_append(vim.split(data, "\r\n", { trimempty = true }))
+			local lines = vim.split(data, "\r\n", { trimempty = true })
+			if #lines > 0 then
+				output_append(vim.split(data, "\r\n", { trimempty = true }))
+			end
 		end
 	end)
 
 	vim.uv.read_start(stderr, function(err, data)
 		if data ~= nil then
-			output_append(vim.split(data, "\r\n", { trimempty = true }))
+			local lines = vim.split(data, "\r\n", { trimempty = true })
+			if #lines > 0 then
+				output_append(vim.split(data, "\r\n", { trimempty = true }))
+			end
 		end
 	end)
 
@@ -686,13 +692,19 @@ function M.uproject_reload(dir, opts)
 					if opts.show_output then
 						vim.uv.read_start(stdio[2], function(err, data)
 							if data ~= nil then
-								output_append(vim.split(data, "\r\n", { trimempty = true }))
+								local lines = vim.split(data, "\r\n", { trimempty = true })
+								if #lines > 0 then
+									output_append(lines)
+								end
 							end
 						end)
 
 						vim.uv.read_start(stdio[3], function(err, data)
 							if data ~= nil then
-								output_append(vim.split(data, "\r\n", { trimempty = true }))
+								local lines = vim.split(data, "\r\n", { trimempty = true })
+								if #lines > 0 then
+									output_append(lines)
+								end
 							end
 						end)
 					end
