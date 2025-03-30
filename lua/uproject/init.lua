@@ -204,7 +204,8 @@ local function transform_output_lines(lines, project_root)
 	end, lines)
 end
 
-local function spawn_show_output(cmd, args, project_root, cb)
+--- @param progress ProgressHandle|nil
+local function spawn_show_output(cmd, args, project_root, progress, cb)
 	local output = make_output_buffer(
 		vim.fn.shellescape(cmd) .. " " ..
 		vim.fn.join(
@@ -213,6 +214,20 @@ local function spawn_show_output(cmd, args, project_root, cb)
 		)
 	)
 	local output_append = vim.schedule_wrap(function(lines)
+		if progress then
+			for _, line in ipairs(lines) do
+				if vim.startswith(line, "[") then
+					local prog, total = string.match(line, "%[(%d+)/(%d+)%]")
+					if prog and total then
+						local prog_num = tonumber(prog)
+						local total_num = tonumber(total)
+
+						progress.percentage = (prog_num / total_num) * 100
+						progress.message = line
+					end
+				end
+			end
+		end
 		append_output_buffer(output, transform_output_lines(lines, project_root))
 	end)
 
@@ -384,9 +399,9 @@ function M.uproject_play(dir, opts)
 		if opts.debug then
 			table.insert(args, 1, ue)
 			table.insert(args, 1, "launch")
-			spawn_show_output("dbg", args, project_root)
+			spawn_show_output("dbg", args, project_root, nil)
 		else
-			spawn_show_output(ue, args, project_root)
+			spawn_show_output(ue, args, project_root, nil)
 		end
 	end)
 end
@@ -757,8 +772,34 @@ function M.uproject_build(dir, opts)
 	if engine_association == nil then
 		return
 	end
+
+
+	local has_fidget, fidget = pcall(require, 'fidget')
+	local fidget_progress = nil
+
+	if has_fidget then
+		fidget_progress = fidget.progress.handle.create({
+			key = "UProjectBuild",
+			title = "Build Uproject",
+			message = "",
+			lsp_client = { name = "ubt" },
+			percentage = 0,
+			cancellable = true,
+		})
+	end
+
+	local function cancel_fidget(reason)
+		if has_fidget then
+			---@diagnostic disable-next-line: need-check-nil
+			fidget_progress.message = reason
+			---@diagnostic disable-next-line: need-check-nil
+			fidget_progress:cancel()
+		end
+	end
+
 	M.unreal_engine_install_dir(engine_association, function(install_dir)
 		if not install_dir then
+			cancel_fidget("cannot find engine install directory")
 			return
 		end
 
@@ -768,6 +809,7 @@ function M.uproject_build(dir, opts)
 
 		vim.schedule_wrap(select_target)(dir, { type_pattern = opts.type_pattern }, function(target)
 			if target == nil then
+				cancel_fidget("no target selected")
 				return
 			end
 
@@ -793,8 +835,12 @@ function M.uproject_build(dir, opts)
 				if opts.open then
 					M.uproject_open(dir, {})
 				end
+
+				if fidget_progress ~= nil then
+					fidget_progress:finish()
+				end
 			end
-			output_bufnr = spawn_show_output(build_bat, args, project_root, on_spawn_done)
+			output_bufnr = spawn_show_output(build_bat, args, project_root, fidget_progress, on_spawn_done)
 		end)
 	end)
 end
@@ -849,7 +895,7 @@ function M.uproject_build_plugins(dir, opts)
 							vim.schedule_wrap(vim.api.nvim_buf_delete)(output_bufnr, { force = true })
 						end
 					end
-					output_bufnr = spawn_show_output(build_bat, args, project_root, on_spawn_done)
+					output_bufnr = spawn_show_output(build_bat, args, project_root, nil, on_spawn_done)
 				end
 			end)
 		end)
