@@ -71,7 +71,7 @@ local function uproject_command(opts)
 end
 
 local function select_target(dir, opts, cb)
-	opts = vim.tbl_extend('force', { type_pattern = ".*" }, opts)
+	opts = vim.tbl_extend('force', { type_pattern = ".*", include_engine_targets = false }, opts)
 	local target_info_path = vim.fs.joinpath(dir, "Intermediate", "TargetInfo.json")
 	local target_info = vim.fn.json_decode(vim.fn.readfile(target_info_path))
 
@@ -79,6 +79,17 @@ local function select_target(dir, opts, cb)
 		local index = target.Type:find(opts.type_pattern)
 		return index ~= nil
 	end, target_info.Targets)
+
+	if not opts.include_engine_targets then
+		local target_info_dir = vim.fs.dirname(target_info_path)
+		targets = vim.tbl_filter(function(target)
+			local target_path = target.Path
+			if vim.fn.isabsolutepath(target_path) == 0 then
+				target_path = vim.fs.normalize(vim.fs.joinpath(target_info_dir, target_path))
+			end
+			return target_path:sub(1, #dir) == dir
+		end, targets)
+	end
 
 	if #targets == 0 then
 		if opts.type_pattern then
