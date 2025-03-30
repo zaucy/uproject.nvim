@@ -217,13 +217,13 @@ local function spawn_show_output(cmd, args, project_root, progress, cb)
 		if progress then
 			for _, line in ipairs(lines) do
 				if vim.startswith(line, "[") then
-					local prog, total = string.match(line, "%[(%d+)/(%d+)%]")
+					local prog, total, whole_prog = string.match(line, "%[(%d+)/(%d+)%]")
 					if prog and total then
 						local prog_num = tonumber(prog)
 						local total_num = tonumber(total)
 
 						progress.percentage = (prog_num / total_num) * 100
-						progress.message = line
+						progress.message = string.sub(line, (string.find(line, "]", 1, true) or 0) + 1)
 					end
 				end
 			end
@@ -617,9 +617,9 @@ function M.uproject_reload(dir, opts)
 		if has_fidget then
 			fidget_progress = fidget.progress.handle.create({
 				key = "UProjectReload",
-				title = "Reload Uproject",
+				title = "󰦱 Reload ",
 				message = "",
-				lsp_client = { name = "ubt" },
+				lsp_client = { name = "uproject.nvim" },
 				percentage = 0,
 				cancellable = true,
 			})
@@ -701,7 +701,6 @@ function M.uproject_reload(dir, opts)
 									if err then
 										notify_error(err)
 									else
-										notify_info("Done")
 										if fidget_progress ~= nil then
 											fidget_progress:finish()
 										end
@@ -780,9 +779,9 @@ function M.uproject_build(dir, opts)
 	if has_fidget then
 		fidget_progress = fidget.progress.handle.create({
 			key = "UProjectBuild",
-			title = "Build Uproject",
+			title = "󰦱 Build ",
 			message = "",
-			lsp_client = { name = "ubt" },
+			lsp_client = { name = "uproject.nvim" },
 			percentage = 0,
 			cancellable = true,
 		})
