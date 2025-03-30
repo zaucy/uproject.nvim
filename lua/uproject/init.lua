@@ -55,6 +55,10 @@ local commands = {
 		local args = parse_fargs(opts.fargs, { "wait", "ignore_junk", "type_pattern", "close_output_on_success" })
 		M.uproject_build_plugins(vim.fn.getcwd(), args)
 	end,
+	show_output = function(opts)
+		local args = parse_fargs(opts.fargs, {})
+		M.show_last_output_buffer()
+	end,
 }
 
 local function uproject_command(opts)
@@ -99,6 +103,8 @@ local function select_target(dir, opts, cb)
 	}, cb)
 end
 
+local _last_output_buffer = nil
+
 ---@param first_line string|nil
 ---@return number
 local function make_output_buffer(first_line)
@@ -109,6 +115,7 @@ local function make_output_buffer(first_line)
 	vim.api.nvim_set_option_value("readonly", true, { buf = bufnr })
 	vim.api.nvim_set_option_value("modified", false, { buf = bufnr })
 	vim.api.nvim_win_set_buf(0, bufnr)
+	_last_output_buffer = bufnr
 	return bufnr
 end
 
@@ -836,6 +843,12 @@ function M.uproject_build_plugins(dir, opts)
 			end)
 		end)
 	end)
+end
+
+function M.show_last_output_buffer()
+	if _last_output_buffer and vim.api.nvim_buf_is_valid(_last_output_buffer) then
+		vim.api.nvim_win_set_buf(0, _last_output_buffer)
+	end
 end
 
 function M.setup(opts)
