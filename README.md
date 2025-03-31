@@ -11,8 +11,11 @@ Install with lazy
 ```lua
 {
 	"zaucy/uproject.nvim",
+	dependencies = {
+		'nvim-lua/plenary.nvim',
+		"j-hui/fidget.nvim", -- optional
+	},
 	cmd = { "Uproject" },
-	lazy = false,
 	opts = {},
 	-- uproject.nvim does not register any keymaps
 	-- here are some recommended ones
