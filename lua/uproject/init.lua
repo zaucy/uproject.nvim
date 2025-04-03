@@ -213,9 +213,21 @@ local function transform_output_lines(lines, project_root)
 	end, lines)
 end
 
---- @param progress ProgressHandle|nil
+--- @class SpawnOutputBufferOptions
+--- @field cmd string
+--- @field args string[]
+--- @field project_root Path
+--- @field progress ProgressHandle|nil
+
+--- @param opts SpawnOutputBufferOptions
+--- @param cb fun(code: number)|nil
 --- @return number bufnr the created buffer number
-local function spawn_output_buffer(cmd, args, project_root, progress, cb)
+local function spawn_output_buffer(opts, cb)
+	local cmd = opts.cmd
+	local args = opts.args
+	local project_root = opts.project_root
+	local progress = opts.progress
+
 	local output = make_output_buffer(
 		vim.fn.shellescape(cmd) .. " " ..
 		vim.fn.join(
@@ -247,6 +259,7 @@ local function spawn_output_buffer(cmd, args, project_root, progress, cb)
 	vim.uv.spawn(cmd, {
 		stdio = { nil, stdout, stderr },
 		args = args,
+		env = opts.env,
 	}, function(code, _)
 		output_append({
 			"",
@@ -409,10 +422,18 @@ function M.uproject_play(dir, opts)
 		if opts.debug then
 			table.insert(args, 1, ue)
 			table.insert(args, 1, "launch")
-			local output = spawn_output_buffer("dbg", args, project_root, nil)
+			local output = spawn_output_buffer({
+				cmd = "dbg",
+				args = args,
+				project_root = project_root,
+			})
 			vim.api.nvim_win_set_buf(0, output)
 		else
-			local output = spawn_output_buffer(ue, args, project_root, nil)
+			local output = spawn_output_buffer({
+				cmd = ue,
+				args = args,
+				project_root = project_root,
+			})
 			vim.api.nvim_win_set_buf(0, output)
 		end
 	end)
@@ -873,7 +894,12 @@ function M.uproject_build(dir, opts)
 					fidget_progress:finish()
 				end
 			end
-			output_bufnr = spawn_output_buffer(build_bat, args, project_root, fidget_progress, on_spawn_done)
+			output_bufnr = spawn_output_buffer({
+				cmd = build_bat,
+				args = args,
+				project_root = project_root,
+				progress = fidget_progress,
+			}, on_spawn_done)
 			if not opts.hide_output then
 				vim.api.nvim_win_set_buf(0, output_bufnr)
 			end
@@ -931,7 +957,11 @@ function M.uproject_build_plugins(dir, opts)
 							vim.schedule_wrap(vim.api.nvim_buf_delete)(output_bufnr, { force = true })
 						end
 					end
-					output_bufnr = spawn_output_buffer(build_bat, args, project_root, nil, on_spawn_done)
+					output_bufnr = spawn_output_buffer({
+						cmd = build_bat,
+						args = args,
+						project_root = project_root,
+					}, on_spawn_done)
 					vim.api.nvim_win_set_buf(0, output_bufnr)
 				end
 			end)
