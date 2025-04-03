@@ -218,6 +218,7 @@ end
 --- @field args string[]
 --- @field project_root Path
 --- @field progress ProgressHandle|nil
+--- @field env table<string, any>? environment variables passed to spawned process
 
 --- @param opts SpawnOutputBufferOptions
 --- @param cb fun(code: number)|nil
@@ -787,6 +788,20 @@ function M.uproject_reload(dir, opts)
 	end
 end
 
+--- @class UprojectBuildOptions
+--- @field ignore_junk boolean|nil
+--- @field type_pattern string|nil
+--- @field close_output_on_success boolean|nil
+--- @field wait boolean|nil
+--- @field open boolean|nil
+--- @field hide_output boolean|nil
+--- @field no_ubt_makefiles boolean|nil
+--- @field skip_rules_compile boolean|nil
+--- @field skip_pre_build_targets boolean|nil
+--- @field env table<string, any>|nil environment variables used when spawning UnrealBuildTool
+
+--- @param dir string|nil
+--- @param opts UprojectBuildOptions
 function M.uproject_build(dir, opts)
 	opts = vim.tbl_extend('force', {
 		ignore_junk = false,
@@ -798,6 +813,7 @@ function M.uproject_build(dir, opts)
 		no_ubt_makefiles = false,
 		skip_rules_compile = false,
 		skip_pre_build_targets = false,
+		env = nil,
 	}, opts)
 	local project_path = M.uproject_path(dir)
 	if project_path == nil then
@@ -899,6 +915,7 @@ function M.uproject_build(dir, opts)
 				args = args,
 				project_root = project_root,
 				progress = fidget_progress,
+				env = opts.env,
 			}, on_spawn_done)
 			if not opts.hide_output then
 				vim.api.nvim_win_set_buf(0, output_bufnr)
