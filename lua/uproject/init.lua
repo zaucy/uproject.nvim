@@ -48,8 +48,17 @@ local commands = {
 		M.uproject_play(vim.fn.getcwd(), args)
 	end,
 	build = function(opts)
-		local args = parse_fargs(opts.fargs,
-			{ "wait", "ignore_junk", "type_pattern", "close_output_on_success", "open", "hide_output" })
+		local args = parse_fargs(opts.fargs, {
+			"wait",
+			"ignore_junk",
+			"type_pattern",
+			"close_output_on_success",
+			"open",
+			"hide_output",
+			"no_ubt_makefiles",
+			"skip_rules_compile",
+			"skip_pre_build_targets",
+		})
 		M.uproject_build(vim.fn.getcwd(), args)
 	end,
 	build_plugins = function(opts)
@@ -758,9 +767,17 @@ function M.uproject_reload(dir, opts)
 end
 
 function M.uproject_build(dir, opts)
-	opts = vim.tbl_extend('force',
-		{ ignore_junk = false, type_pattern = nil, close_output_on_success = false, wait = false, open = false, hide_output = false },
-		opts)
+	opts = vim.tbl_extend('force', {
+		ignore_junk = false,
+		type_pattern = nil,
+		close_output_on_success = false,
+		wait = false,
+		open = false,
+		hide_output = false,
+		no_ubt_makefiles = false,
+		skip_rules_compile = false,
+		skip_pre_build_targets = false,
+	}, opts)
 	local project_path = M.uproject_path(dir)
 	if project_path == nil then
 		vim.notify("cannot find uproject in " .. dir, vim.log.levels.ERROR)
@@ -828,6 +845,18 @@ function M.uproject_build(dir, opts)
 
 			if opts.ignore_junk then
 				table.insert(args, "-IgnoreJunk")
+			end
+
+			if opts.no_ubt_makefiles then
+				table.insert(args, "-NoUBTMakefiles")
+			end
+
+			if opts.skip_rules_compile then
+				table.insert(args, "-SkipRulesCompile")
+			end
+
+			if opts.skip_pre_build_targets then
+				table.insert(args, "-SkipPreBuildTargets")
 			end
 
 			local output_bufnr = -1
