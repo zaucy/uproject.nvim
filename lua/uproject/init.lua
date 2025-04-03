@@ -48,7 +48,8 @@ local commands = {
 		M.uproject_play(vim.fn.getcwd(), args)
 	end,
 	build = function(opts)
-		local args = parse_fargs(opts.fargs, { "wait", "ignore_junk", "type_pattern", "close_output_on_success", "open" })
+		local args = parse_fargs(opts.fargs,
+			{ "wait", "ignore_junk", "type_pattern", "close_output_on_success", "open", "hide_output" })
 		M.uproject_build(vim.fn.getcwd(), args)
 	end,
 	build_plugins = function(opts)
@@ -125,7 +126,6 @@ local function make_output_buffer(first_line)
 	end
 	vim.api.nvim_set_option_value("readonly", true, { buf = bufnr })
 	vim.api.nvim_set_option_value("modified", false, { buf = bufnr })
-	vim.api.nvim_win_set_buf(0, bufnr)
 	_last_output_buffer = bufnr
 	return bufnr
 end
@@ -205,7 +205,8 @@ local function transform_output_lines(lines, project_root)
 end
 
 --- @param progress ProgressHandle|nil
-local function spawn_show_output(cmd, args, project_root, progress, cb)
+--- @return number bufnr the created buffer number
+local function spawn_output_buffer(cmd, args, project_root, progress, cb)
 	local output = make_output_buffer(
 		vim.fn.shellescape(cmd) .. " " ..
 		vim.fn.join(
@@ -399,9 +400,11 @@ function M.uproject_play(dir, opts)
 		if opts.debug then
 			table.insert(args, 1, ue)
 			table.insert(args, 1, "launch")
-			spawn_show_output("dbg", args, project_root, nil)
+			local output = spawn_output_buffer("dbg", args, project_root, nil)
+			vim.api.nvim_win_set_buf(0, output)
 		else
-			spawn_show_output(ue, args, project_root, nil)
+			local output = spawn_output_buffer(ue, args, project_root, nil)
+			vim.api.nvim_win_set_buf(0, output)
 		end
 	end)
 end
@@ -574,6 +577,7 @@ function M.uproject_reload(dir, opts)
 
 	if opts.show_output then
 		output = make_output_buffer()
+		vim.api.nvim_win_set_buf(0, output)
 	end
 
 	local project_root = Path:new(vim.fs.dirname(project_path))
@@ -755,7 +759,8 @@ end
 
 function M.uproject_build(dir, opts)
 	opts = vim.tbl_extend('force',
-		{ ignore_junk = false, type_pattern = nil, close_output_on_success = false, wait = false, open = false }, opts)
+		{ ignore_junk = false, type_pattern = nil, close_output_on_success = false, wait = false, open = false, hide_output = false },
+		opts)
 	local project_path = M.uproject_path(dir)
 	if project_path == nil then
 		vim.notify("cannot find uproject in " .. dir, vim.log.levels.ERROR)
@@ -839,7 +844,10 @@ function M.uproject_build(dir, opts)
 					fidget_progress:finish()
 				end
 			end
-			output_bufnr = spawn_show_output(build_bat, args, project_root, fidget_progress, on_spawn_done)
+			output_bufnr = spawn_output_buffer(build_bat, args, project_root, fidget_progress, on_spawn_done)
+			if not opts.hide_output then
+				vim.api.nvim_win_set_buf(0, output_bufnr)
+			end
 		end)
 	end)
 end
@@ -894,7 +902,8 @@ function M.uproject_build_plugins(dir, opts)
 							vim.schedule_wrap(vim.api.nvim_buf_delete)(output_bufnr, { force = true })
 						end
 					end
-					output_bufnr = spawn_show_output(build_bat, args, project_root, nil, on_spawn_done)
+					output_bufnr = spawn_output_buffer(build_bat, args, project_root, nil, on_spawn_done)
+					vim.api.nvim_win_set_buf(0, output_bufnr)
 				end
 			end)
 		end)
