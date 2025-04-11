@@ -31,3 +31,14 @@ Install with lazy
 }
 ```
 
+## Automatically refresh compile_commands
+
+```lua
+-- reload when directory changes
+vim.api.nvim_create_autocmd("DirChanged", {
+	pattern = { "global" },
+	callback = function(ev)
+		require("uproject").uproject_reload(vim.v.event.cwd, {})
+	end,
+})
+```

@@ -1000,13 +1000,6 @@ function M.setup(opts)
 		},
 	})
 
-	vim.api.nvim_create_autocmd("DirChanged", {
-		pattern = { "global" },
-		callback = function(ev)
-			M.uproject_reload(vim.v.event.cwd, {})
-		end,
-	})
-
 	vim.api.nvim_create_user_command("Uproject", uproject_command, {
 		nargs = '+',
 		desc = "Build, play or open an Unreal project",
@@ -1014,8 +1007,6 @@ function M.setup(opts)
 			return vim.tbl_keys(commands)
 		end,
 	})
-
-	M.uproject_reload(vim.fn.getcwd(), {})
 end
 
 return M
