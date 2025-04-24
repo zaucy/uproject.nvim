@@ -307,31 +307,73 @@ function M.uproject_path(dir)
 	return nil, nil
 end
 
+--- @class NoEngineAssociation
+--- @field kind "none"
+
+--- @class SystemEngineAssociation
+--- @field kind "system"
+--- @field version string
+
+--- @class LocalEngineAssociation
+--- @field kind "local"
+--- @field path string
+
+--- @alias EngineAssociation
+--- | NoEngineAssociation
+--- | SystemEngineAssociation
+--- | LocalEngineAssociation
+
+--- @param dir string
+--- @return EngineAssociation
 function M.uproject_engine_association(dir)
 	local p = M.uproject_path(dir)
 	if p == nil then
-		return nil
+		return { kind = "none" }
+	end
+
+	--- TODO: add configurable local engine installs or some more common locations
+	local local_engine_dir = vim.fs.joinpath(dir, "..", "InstalledEngine")
+	if vim.fn.isdirectory(local_engine_dir) == 1 then
+		return {
+			kind = "local",
+			path = local_engine_dir,
+		}
 	end
 
 	local info = vim.fn.json_decode(vim.fn.readfile(p))
-	return info["EngineAssociation"]
+	return {
+		kind = "system",
+		version = info["EngineAssociation"]
+	}
 end
 
+--- @param engine_association EngineAssociation|string
 function M.unreal_engine_install_dir(engine_association, cb)
+	if engine_association.kind == "none" then
+		cb(nil)
+		return
+	end
+
+	if engine_association.kind == "local" then
+		cb(engine_association.path)
+		return
+	end
+
+
 	local stdout = vim.uv.new_pipe()
 	local stdout_str = ""
 	local spawn_opts = {
 		stdio = { nil, stdout, nil },
 		args = {
 			'query',
-			'HKLM\\SOFTWARE\\EpicGames\\Unreal Engine\\' .. engine_association,
+			'HKLM\\SOFTWARE\\EpicGames\\Unreal Engine\\' .. engine_association.version,
 			'/v', 'InstalledDirectory',
 		},
 	}
 	vim.uv.spawn('reg', spawn_opts, function(_, _)
 		local lines = vim.split(stdout_str, '\r\n', { trimempty = true })
 		if #lines == 0 then
-			vim.notify("cannot find unreal " .. engine_association .. " install directory", vim.log.levels.ERROR)
+			vim.notify("cannot find unreal " .. engine_association.version .. " install directory", vim.log.levels.ERROR)
 			vim.schedule_wrap(cb)(nil)
 			return
 		end
@@ -361,7 +403,7 @@ function M.uproject_open(dir, opts)
 	local project_path = Path:new(project_path)
 
 	local engine_association = M.uproject_engine_association(dir)
-	if engine_association == nil then
+	if engine_association.kind == "none" then
 		return
 	end
 
@@ -401,7 +443,7 @@ function M.uproject_play(dir, opts)
 	local project_path = Path:new(project_path)
 
 	local engine_association = M.uproject_engine_association(dir)
-	if engine_association == nil then
+	if engine_association.kind == "none" then
 		return
 	end
 
@@ -472,7 +514,7 @@ function M.get_ubt(dir, cb)
 
 	dir = vim.fs.dirname(project_path)
 	local engine_association = M.uproject_engine_association(dir)
-	if engine_association == nil then
+	if engine_association.kind == "none" then
 		cb(nil)
 		return
 	end
@@ -493,7 +535,7 @@ function M.get_project_engine_info(dir, cb)
 
 	dir = vim.fs.dirname(project_path)
 	local engine_association = M.uproject_engine_association(dir)
-	if engine_association == nil then
+	if engine_association.kind == "none" then
 		cb(nil)
 		return
 	end
@@ -640,7 +682,7 @@ function M.uproject_reload(dir, opts)
 
 	local engine_association = M.uproject_engine_association(dir)
 
-	if engine_association == nil then
+	if engine_association.kind == "none" then
 		output_append({ "[uproject.nvim] error: cannot find ureal engine association in " .. dir })
 		return
 	end
@@ -827,7 +869,7 @@ function M.uproject_build(dir, opts)
 	local project_path = Path:new(project_path)
 
 	local engine_association = M.uproject_engine_association(dir)
-	if engine_association == nil then
+	if engine_association.kind == "none" then
 		return
 	end
 
@@ -949,7 +991,7 @@ function M.uproject_build_plugins(dir, opts)
 	local project_path = Path:new(project_path)
 
 	local engine_association = M.uproject_engine_association(dir)
-	if engine_association == nil then
+	if engine_association.kind == "none" then
 		return
 	end
 	M.unreal_engine_install_dir(engine_association, function(install_dir)
