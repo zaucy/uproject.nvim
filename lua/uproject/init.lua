@@ -902,7 +902,7 @@ function M.uproject_build(dir, opts)
 					vim.schedule_wrap(vim.api.nvim_buf_delete)(output_bufnr, { force = true })
 				end
 
-				if opts.open then
+				if opts.open and exit_code == 0 then
 					M.uproject_open(dir, {})
 				end
 
