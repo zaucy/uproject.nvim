@@ -906,8 +906,18 @@ function M.uproject_build(dir, opts)
 					M.uproject_open(dir, {})
 				end
 
+				if exit_code ~= 0 then
+					vim.notify("󰦱 Build failed with exit code " .. tostring(exit_code), vim.log.levels.ERROR)
+				end
+
 				if fidget_progress ~= nil then
-					fidget_progress:finish()
+					if exit_code ~= 0 then
+						fidget_progress.percentage = nil
+						fidget_progress.message = "build failed with exit code " .. tostring(exit_code)
+						fidget_progress:cancel()
+					else
+						fidget_progress:finish()
+					end
 				end
 			end
 			output_bufnr = spawn_output_buffer({
