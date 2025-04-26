@@ -526,6 +526,13 @@ function M.get_ubt(dir, cb)
 	end)
 end
 
+--- @class UprojectEngineInfo
+--- @field engine_association LocalEngineAssociation|SystemEngineAssociation
+--- @field install_dir string
+--- @field project_dir string
+
+--- @param dir string
+--- @param cb fun(info: UprojectEngineInfo|nil)
 function M.get_project_engine_info(dir, cb)
 	local project_path = M.uproject_path(dir)
 	if project_path == nil then
@@ -544,6 +551,7 @@ function M.get_project_engine_info(dir, cb)
 		cb({
 			engine_association = engine_association,
 			install_dir = install_dir,
+			project_dir = dir,
 		})
 	end)
 end
