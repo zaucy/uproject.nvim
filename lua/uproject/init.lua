@@ -764,15 +764,17 @@ function M.uproject_reload(dir, opts)
 				end,
 				function(step_done)
 					notify_info("Generating compile_commands.json", true)
+					local args = {
+						'-mode=GenerateClangDatabase',
+						'-project=' .. project_path:absolute(),
+						'-game',
+						'-engine',
+						'-Target=UnrealEditor Development Win64',
+					}
+					output_append({ ubt .. " " .. vim.fn.join(args, " ") })
 					vim.uv.spawn(ubt, {
 						stdio = stdio,
-						args = {
-							'-mode=GenerateClangDatabase',
-							'-project=' .. project_path:absolute(),
-							'-game',
-							'-engine',
-							'-Target=UnrealEditor Development Win64',
-						},
+						args = args,
 					}, function(code, _)
 						if code ~= 0 then
 							notify_error("Failed to reload uproject (exit code " .. code .. ")")
