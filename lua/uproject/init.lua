@@ -58,8 +58,15 @@ local commands = {
 			"no_ubt_makefiles",
 			"skip_rules_compile",
 			"skip_pre_build_targets",
+			"clean",
 		})
 		M.uproject_build(vim.fn.getcwd(), args)
+	end,
+	clean = function(opts)
+		local args = parse_fargs(opts.fargs, {
+			"type_pattern",
+		})
+		M.uproject_clean(vim.fn.getcwd(), args)
 	end,
 	build_plugins = function(opts)
 		local args = parse_fargs(opts.fargs, { "wait", "ignore_junk", "type_pattern", "close_output_on_success" })
@@ -974,6 +981,116 @@ function M.uproject_build(dir, opts)
 			end
 			output_bufnr = spawn_output_buffer({
 				cmd = build_bat,
+				args = args,
+				project_root = project_root,
+				progress = fidget_progress,
+				env = opts.env,
+			}, on_spawn_done)
+			if not opts.hide_output then
+				vim.api.nvim_win_set_buf(0, output_bufnr)
+			end
+		end)
+	end)
+end
+
+--- @class UprojectCleanOptions
+--- @field type_pattern string|nil
+--- @field env table<string, any>|nil environment variables used when spawning UnrealBuildTool
+
+--- @param dir string|nil
+--- @param opts UprojectCleanOptions
+function M.uproject_clean(dir, opts)
+	opts = vim.tbl_extend('force', {
+		env = nil,
+		type_pattern = nil,
+	}, opts)
+	local project_path = M.uproject_path(dir)
+	if project_path == nil then
+		vim.notify("cannot find uproject in " .. dir, vim.log.levels.ERROR)
+		return
+	end
+	dir = vim.fs.dirname(project_path)
+
+	local project_root = Path:new(vim.fs.dirname(project_path))
+	---@diagnostic disable-next-line: redefined-local
+	local project_path = Path:new(project_path)
+
+	local engine_association = M.uproject_engine_association(dir)
+	if engine_association.kind == "none" then
+		return
+	end
+
+
+	local has_fidget, fidget = pcall(require, 'fidget')
+	local fidget_progress = nil
+
+	if has_fidget then
+		fidget_progress = fidget.progress.handle.create({
+			key = "UProjectBuild",
+			title = "󰦱 Build ",
+			message = "",
+			lsp_client = { name = "uproject.nvim" },
+			percentage = 0,
+			cancellable = true,
+		})
+	end
+
+	local function cancel_fidget(reason)
+		if has_fidget then
+			---@diagnostic disable-next-line: need-check-nil
+			fidget_progress.message = reason
+			---@diagnostic disable-next-line: need-check-nil
+			fidget_progress:cancel()
+		end
+	end
+
+	M.unreal_engine_install_dir(engine_association, function(install_dir)
+		if not install_dir then
+			cancel_fidget("cannot find engine install directory")
+			return
+		end
+
+		local engine_dir = vim.fs.joinpath(install_dir, "Engine")
+		local clean_bat = vim.fs.joinpath(
+			engine_dir, "Build", "BatchFiles", "Clean.bat")
+
+		vim.schedule_wrap(select_target)(dir, { type_pattern = opts.type_pattern }, function(target)
+			if target == nil then
+				cancel_fidget("no target selected")
+				return
+			end
+
+			local args = {
+				"-Project=" .. project_path:absolute(),
+				"-Target=" .. target.Name .. " Win64 Development",
+			}
+
+			local output_bufnr = -1
+			local on_spawn_done = function(exit_code)
+				if opts.close_output_on_success and exit_code == 0 then
+					vim.schedule_wrap(vim.api.nvim_buf_delete)(output_bufnr, { force = true })
+				end
+
+				if opts.open and exit_code == 0 then
+					M.uproject_open(dir, {})
+				end
+
+				if exit_code ~= 0 then
+					vim.notify("󰦱 Clean failed with exit code " .. tostring(exit_code), vim.log.levels.ERROR)
+				end
+
+				if fidget_progress ~= nil then
+					if exit_code ~= 0 then
+						fidget_progress.percentage = nil
+						fidget_progress.message = "clean failed with exit code " .. tostring(exit_code)
+						fidget_progress:cancel()
+					else
+						fidget_progress:finish()
+					end
+				end
+			end
+			output_bufnr = spawn_output_buffer({
+				cmd = clean_bat,
 				args = args,
 				project_root = project_root,
 				progress = fidget_progress,
