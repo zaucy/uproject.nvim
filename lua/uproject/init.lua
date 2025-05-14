@@ -40,7 +40,7 @@ local commands = {
 		M.uproject_reload(vim.fn.getcwd(), args)
 	end,
 	open = function(opts)
-		local args = parse_fargs(opts.fargs, { "log_cmds" })
+		local args = parse_fargs(opts.fargs, { "log_cmds", "debug" })
 		M.uproject_open(vim.fn.getcwd(), args)
 	end,
 	play = function(opts)
@@ -397,8 +397,19 @@ function M.unreal_engine_install_dir(engine_association, cb)
 	end)
 end
 
+--- @class UprojectOpenOptions
+--- @field debug boolean|nil
+--- @field log_cmds string|nil
+--- @field env table<string, any>|nil environment variables used when spawning
+
+--- @param dir string|nil
+--- @param opts UprojectOpenOptions
 function M.uproject_open(dir, opts)
-	opts = vim.tbl_extend('force', {}, opts)
+	opts = vim.tbl_extend('force', {
+		debug = false,
+		env = nil,
+		log_cmds = nil,
+	}, opts)
 	local project_path = M.uproject_path(dir)
 	if project_path == nil then
 		vim.notify("cannot find uproject in " .. dir, vim.log.levels.ERROR)
@@ -427,12 +438,25 @@ function M.uproject_open(dir, opts)
 			table.insert(args, "-LogCmds=" .. opts.log_cmds)
 		end
 
-		vim.uv.spawn(ue, {
-			detached = true,
-			hide = true,
-			args = args,
-		}, function(code, _)
-		end)
+		if opts.debug then
+			table.insert(args, 1, ue)
+			table.insert(args, 1, "launch")
+			vim.uv.spawn("dbg", {
+				detached = true,
+				hide = true,
+				args = args,
+				env = opts.env,
+			}, function(code, _)
+			end)
+		else
+			vim.uv.spawn(ue, {
+				detached = true,
+				hide = true,
+				args = args,
+				env = opts.env,
+			}, function(code, _)
+			end)
+		end
 	end)
 end
 
