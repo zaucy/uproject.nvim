@@ -141,8 +141,7 @@ local function make_output_buffer(first_line)
 	if first_line ~= nil then
 		vim.api.nvim_buf_set_lines(bufnr, 0, 1, true, { first_line })
 	end
-	vim.api.nvim_set_option_value("readonly", true, { buf = bufnr })
-	vim.api.nvim_set_option_value("modified", false, { buf = bufnr })
+	vim.api.nvim_set_option_value("modifiable", false, { buf = bufnr })
 	_last_output_buffer = bufnr
 	return bufnr
 end
@@ -182,7 +181,7 @@ local function append_output_buffer(bufnr, lines)
 		was_at_end = cursor_line == buf_line_count
 	end
 
-	vim.api.nvim_set_option_value("readonly", false, { buf = bufnr })
+	vim.api.nvim_set_option_value("modifiable", true, { buf = bufnr })
 	vim.api.nvim_buf_set_lines(bufnr, -1, -1, true, lines)
 
 	local buf_line_count = vim.api.nvim_buf_line_count(bufnr)
@@ -201,8 +200,7 @@ local function append_output_buffer(bufnr, lines)
 		end
 	end
 
-	vim.api.nvim_set_option_value("readonly", true, { buf = bufnr })
-	vim.api.nvim_set_option_value("modified", false, { buf = bufnr })
+	vim.api.nvim_set_option_value("modifiable", false, { buf = bufnr })
 
 	if bufwin ~= -1 and was_at_end then
 		vim.api.nvim_win_set_cursor(bufwin, { buf_line_count, 0 })
