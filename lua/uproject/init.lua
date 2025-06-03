@@ -1,5 +1,6 @@
 local Path = require("plenary.path")
 local util = require("uproject.util")
+local async = require("async")
 
 local M = {}
 ---@param arg string
@@ -88,7 +89,11 @@ local function uproject_command(opts)
 	command(opts)
 end
 
+--- @async
+--- @return any|nil selected_target
 local function select_target(dir, opts, cb)
+	async.schedule()
+
 	opts = vim.tbl_extend('force', { type_pattern = ".*", include_engine_targets = false }, opts)
 	local target_info_path = vim.fs.joinpath(dir, "Intermediate", "TargetInfo.json")
 	local target_info = vim.fn.json_decode(vim.fn.readfile(target_info_path))
@@ -120,16 +125,17 @@ local function select_target(dir, opts, cb)
 	end
 
 	if #targets == 1 then
-		cb(targets[1])
-		return
+		return targets[1]
 	end
 
-	vim.ui.select(targets, {
+	local target = async.await(async.awrap(3, vim.ui.select)(targets, {
 		prompt = "Select Uproject Target",
 		format_item = function(target)
-			return target.Name .. " (" .. target.Type .. ")"
+			return string.format("%s (%s)", target.Name, target.Type)
 		end
-	}, cb)
+	}))
+
+	return target
 end
 
 local _last_output_buffer = nil
@@ -484,6 +490,10 @@ function M.uproject_play(dir, opts)
 		"-Game",
 	}
 
+	if opts.startup then
+		assert(vim.startswith(opts.startup, "/Game/"), "invalid map asset path")
+	end
+
 	if opts.log_cmds then
 		table.insert(args, "-LogCmds=" .. opts.log_cmds)
 	end
@@ -554,6 +564,36 @@ function M.get_ubt(dir, cb)
 		local ubt = vim.fs.joinpath(engine_dir, "Binaries", "DotNET", "UnrealBuildTool", "UnrealBuildTool.exe")
 		cb(ubt)
 	end)
+end
+
+--- @class uproject.UnrealAssetBasicInfo
+--- @field file_path string
+--- @field asset_path string
+
+--- @param dir string
+--- @return uproject.UnrealAssetBasicInfo[]
+function M.get_umaps(dir)
+	local project_path = M.uproject_path(dir)
+	if project_path == nil then
+		return {}
+	end
+
+	dir = vim.fs.dirname(project_path)
+	local content_dir = vim.fs.joinpath(dir, "Content")
+
+	local umap_files = vim.fs.find(
+		function(name, _) return name:match('.*%.umap$') end,
+		{ limit = math.huge, type = 'file', path = content_dir }
+	)
+
+	--- @param p string
+	return vim.tbl_map(function(p)
+		--- @type uproject.UnrealAssetBasicInfo
+		return {
+			file_path = p,
+			asset_path = string.format("/Game/%s", p:sub(7, #p - 5)),
+		}
+	end, umap_files)
 end
 
 --- @class UprojectEngineInfo
@@ -884,7 +924,7 @@ end
 
 --- @param dir string|nil
 --- @param opts UprojectBuildOptions
-function M.uproject_build(dir, opts)
+M.uproject_build = async.async(function(dir, opts)
 	opts = vim.tbl_extend('force', {
 		ignore_junk = false,
 		type_pattern = nil,
@@ -937,84 +977,82 @@ function M.uproject_build(dir, opts)
 		end
 	end
 
-	M.unreal_engine_install_dir(engine_association, function(install_dir)
-		if not install_dir then
-			cancel_fidget("cannot find engine install directory")
-			return
+	local install_dir = async.await(M.unreal_engine_install_dir(engine_association))
+	if not install_dir then
+		cancel_fidget("cannot find engine install directory")
+		return
+	end
+
+	local engine_dir = vim.fs.joinpath(install_dir, "Engine")
+	local build_bat = vim.fs.joinpath(engine_dir, "Build", "BatchFiles", "Build.bat")
+
+	async.schedule()
+	local target = select_target(dir, { type_pattern = opts.type_pattern })
+
+	if target == nil then
+		cancel_fidget("no target selected")
+		return
+	end
+
+	local args = {
+		"-Project=" .. project_path:absolute(),
+		"-Target=" .. target.Name .. " Win64 Development",
+	}
+
+	if opts.wait then
+		table.insert(args, "-WaitMutex")
+	end
+
+	if opts.ignore_junk then
+		table.insert(args, "-IgnoreJunk")
+	end
+
+	if opts.no_ubt_makefiles then
+		table.insert(args, "-NoUBTMakefiles")
+	end
+
+	if opts.skip_rules_compile then
+		table.insert(args, "-SkipRulesCompile")
+	end
+
+	if opts.skip_pre_build_targets then
+		table.insert(args, "-SkipPreBuildTargets")
+	end
+
+	local output_bufnr, exit_code = spawn_output_buffer({
+		cmd = build_bat,
+		args = args,
+		project_root = project_root,
+		progress = fidget_progress,
+		env = opts.env,
+	})
+
+	if opts.close_output_on_success and exit_code == 0 then
+		vim.schedule_wrap(vim.api.nvim_buf_delete)(output_bufnr, { force = true })
+	end
+
+	if opts.open and exit_code == 0 then
+		M.uproject_open(dir, {})
+	end
+
+	if exit_code ~= 0 then
+		vim.notify("󰦱 Build failed with exit code " .. tostring(exit_code), vim.log.levels.ERROR)
+	end
+
+	if fidget_progress ~= nil then
+		if exit_code ~= 0 then
+			fidget_progress.percentage = nil
+			fidget_progress.message = "build failed with exit code " .. tostring(exit_code)
+			fidget_progress:cancel()
+		else
+			fidget_progress:finish()
 		end
+	end
 
-		local engine_dir = vim.fs.joinpath(install_dir, "Engine")
-		local build_bat = vim.fs.joinpath(
-			engine_dir, "Build", "BatchFiles", "Build.bat")
-
-		vim.schedule_wrap(select_target)(dir, { type_pattern = opts.type_pattern }, function(target)
-			if target == nil then
-				cancel_fidget("no target selected")
-				return
-			end
-
-			local args = {
-				"-Project=" .. project_path:absolute(),
-				"-Target=" .. target.Name .. " Win64 Development",
-			}
-
-			if opts.wait then
-				table.insert(args, "-WaitMutex")
-			end
-
-			if opts.ignore_junk then
-				table.insert(args, "-IgnoreJunk")
-			end
-
-			if opts.no_ubt_makefiles then
-				table.insert(args, "-NoUBTMakefiles")
-			end
-
-			if opts.skip_rules_compile then
-				table.insert(args, "-SkipRulesCompile")
-			end
-
-			if opts.skip_pre_build_targets then
-				table.insert(args, "-SkipPreBuildTargets")
-			end
-
-			local output_bufnr = -1
-			local on_spawn_done = function(exit_code)
-				if opts.close_output_on_success and exit_code == 0 then
-					vim.schedule_wrap(vim.api.nvim_buf_delete)(output_bufnr, { force = true })
-				end
-
-				if opts.open and exit_code == 0 then
-					M.uproject_open(dir, {})
-				end
-
-				if exit_code ~= 0 then
-					vim.notify("󰦱 Build failed with exit code " .. tostring(exit_code), vim.log.levels.ERROR)
-				end
-
-				if fidget_progress ~= nil then
-					if exit_code ~= 0 then
-						fidget_progress.percentage = nil
-						fidget_progress.message = "build failed with exit code " .. tostring(exit_code)
-						fidget_progress:cancel()
-					else
-						fidget_progress:finish()
-					end
-				end
-			end
-			output_bufnr = spawn_output_buffer({
-				cmd = build_bat,
-				args = args,
-				project_root = project_root,
-				progress = fidget_progress,
-				env = opts.env,
-			}, on_spawn_done)
-			if not opts.hide_output then
-				vim.api.nvim_win_set_buf(0, output_bufnr)
-			end
-		end)
-	end)
-end
+	if not opts.hide_output then
+		vim.api.nvim_win_set_buf(0, output_bufnr)
+	end
+end)
 
 --- @class UprojectCleanOptions
 --- @field type_pattern string|nil
