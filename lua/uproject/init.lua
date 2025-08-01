@@ -45,7 +45,7 @@ local commands = {
 		M.uproject_open(vim.fn.getcwd(), args)
 	end,
 	play = function(opts)
-		local args = parse_fargs(opts.fargs, { "log_cmds", "debug" })
+		local args = parse_fargs(opts.fargs, { "log_cmds", "debug", "use_last_target" })
 		M.uproject_play(vim.fn.getcwd(), args)
 	end,
 	build = function(opts)
@@ -53,6 +53,7 @@ local commands = {
 			"wait",
 			"ignore_junk",
 			"type_pattern",
+			"configuration_pattern",
 			"close_output_on_success",
 			"open",
 			"hide_output",
@@ -60,12 +61,14 @@ local commands = {
 			"skip_rules_compile",
 			"skip_pre_build_targets",
 			"clean",
+			"use_last_target",
 		})
 		M.uproject_build(vim.fn.getcwd(), args)
 	end,
 	clean = function(opts)
 		local args = parse_fargs(opts.fargs, {
 			"type_pattern",
+			"use_last_target",
 		})
 		M.uproject_clean(vim.fn.getcwd(), args)
 	end,
@@ -88,8 +91,39 @@ local function uproject_command(opts)
 	command(opts)
 end
 
+--- @param cb fun(platforms: string[])
+local function get_available_platforms(cb)
+	-- TODO: actually check
+	vim.schedule(function()
+		cb({ "Win64" })
+	end)
+end
+
+
+--- @param target any
+--- @param platform string
+--- @param cb fun(configurations: string[])
+local function get_available_target_configurations(target, platform, cb)
+	-- TODO: actually check
+	vim.schedule(function()
+		if target.Type == "Editor" then
+			cb({ "Debug", "Development" })
+		else
+			cb({ "Debug", "DebugGame", "Development", "Test", "Shipping" })
+		end
+	end)
+end
+
+local _last_selected_target = nil
 local function select_target(dir, opts, cb)
-	opts = vim.tbl_extend('force', { type_pattern = ".*", include_engine_targets = false }, opts)
+	opts = vim.tbl_extend('force', { type_pattern = ".*", configuration_pattern = ".*", include_engine_targets = false, use_last_target = false }, opts)
+
+	if opts.use_last_target and _last_selected_target then
+		local target = vim.deepcopy(_last_selected_target, true)
+		vim.schedule(function() cb(target) end)
+		return
+	end
+
 	local target_info_path = vim.fs.joinpath(dir, "Intermediate", "TargetInfo.json")
 	local target_info = vim.fn.json_decode(vim.fn.readfile(target_info_path))
 
@@ -119,17 +153,75 @@ local function select_target(dir, opts, cb)
 		return
 	end
 
-	if #targets == 1 then
-		cb(targets[1])
-		return
+	local select_options = {}
+	local finished_callbacks = 0
+	local expected_num_callbacks = 0
+
+	local function check_done()
+		if finished_callbacks ~= expected_num_callbacks then
+			return;
+		end
+
+		select_options = vim.tbl_filter(function(target)
+			local index = target.Configuration:find(opts.configuration_pattern)
+			return index ~= nil
+		end, select_options)
+
+		if #targets == 0 then
+			if opts.configuration_pattern then
+				vim.notify("no uproject targets with configuration pattern '" .. opts.configuration_pattern .. "' found in " .. dir,
+					vim.log.levels.ERROR)
+			else
+				vim.notify("no uproject targets found in " .. dir, vim.log.levels.ERROR)
+			end
+			return
+		end
+
+		if #select_options == 1 then
+			_last_selected_target = select_options[1]
+			cb(select_options[1])
+			return
+		end
+
+		local max_prefix = 0
+		for _, target in ipairs(select_options) do
+			max_prefix = math.max(max_prefix, #string.format("%s %s %s", target.Name, target.Platform, target.Configuration))
+		end
+
+		vim.ui.select(select_options, {
+			prompt = "Select Uproject Target",
+			format_item = function(target)
+				return string.format("%s %s %-" .. max_prefix .. "s Type=%s", target.Name, target.Platform, target.Configuration, target.Type)
+			end
+		}, function(selected)
+			_last_selected_target = selected
+			cb(selected)
+		end)
 	end
 
-	vim.ui.select(targets, {
-		prompt = "Select Uproject Target",
-		format_item = function(target)
-			return target.Name .. " (" .. target.Type .. ")"
+	expected_num_callbacks = expected_num_callbacks + 1
+	get_available_platforms(function(platforms)
+		finished_callbacks = finished_callbacks + 1
+		for _, platform in ipairs(platforms) do
+			for _, target in ipairs(targets) do
+				local target_option = vim.deepcopy(target, true)
+				target_option.Platform = platform;
+				expected_num_callbacks = expected_num_callbacks + 1
+				get_available_target_configurations(target, platform, function(configurations)
+					finished_callbacks = finished_callbacks + 1
+					for _, configuration in ipairs(configurations) do
+						local target_option_with_config = vim.deepcopy(target_option, true)
+						target_option_with_config.Configuration = configuration
+						table.insert(select_options, target_option_with_config)
+					end
+
+					check_done()
+				end)
+			end
 		end
-	}, cb)
+
+		check_done()
+	end)
 end
 
 local _last_output_buffer = nil
@@ -873,6 +965,7 @@ end
 --- @class UprojectBuildOptions
 --- @field ignore_junk boolean|nil
 --- @field type_pattern string|nil
+--- @field configuration_pattern string|nil
 --- @field close_output_on_success boolean|nil
 --- @field wait boolean|nil
 --- @field open boolean|nil
@@ -880,6 +973,7 @@ end
 --- @field no_ubt_makefiles boolean|nil
 --- @field skip_rules_compile boolean|nil
 --- @field skip_pre_build_targets boolean|nil
+--- @field use_last_target boolean|nil
 --- @field env table<string, any>|nil environment variables used when spawning UnrealBuildTool
 
 --- @param dir string|nil
@@ -888,6 +982,7 @@ function M.uproject_build(dir, opts)
 	opts = vim.tbl_extend('force', {
 		ignore_junk = false,
 		type_pattern = nil,
+		configuration_pattern = nil,
 		close_output_on_success = false,
 		wait = false,
 		open = false,
@@ -896,6 +991,7 @@ function M.uproject_build(dir, opts)
 		skip_rules_compile = false,
 		skip_pre_build_targets = false,
 		env = nil,
+		use_last_target = false,
 	}, opts)
 	local project_path = M.uproject_path(dir)
 	if project_path == nil then
@@ -947,15 +1043,24 @@ function M.uproject_build(dir, opts)
 		local build_bat = vim.fs.joinpath(
 			engine_dir, "Build", "BatchFiles", "Build.bat")
 
-		vim.schedule_wrap(select_target)(dir, { type_pattern = opts.type_pattern }, function(target)
+		local select_target_options = {
+			type_pattern = opts.type_pattern,
+			configuration_pattern = opts.configuration_pattern,
+			use_last_target = opts.use_last_target,
+		}
+		vim.schedule_wrap(select_target)(dir, select_target_options, function(target)
 			if target == nil then
 				cancel_fidget("no target selected")
 				return
 			end
 
+			if fidget_progress then
+				fidget_progress.title = string.format("󰦱 %s %s %s ", target.Name, target.Platform, target.Configuration)
+			end
+
 			local args = {
 				"-Project=" .. project_path:absolute(),
-				"-Target=" .. target.Name .. " Win64 Development",
+				string.format("-Target=%s %s %s", target.Name, target.Platform, target.Configuration),
 			}
 
 			if opts.wait then
@@ -1077,7 +1182,12 @@ function M.uproject_clean(dir, opts)
 		local clean_bat = vim.fs.joinpath(
 			engine_dir, "Build", "BatchFiles", "Clean.bat")
 
-		vim.schedule_wrap(select_target)(dir, { type_pattern = opts.type_pattern }, function(target)
+		local select_target_options = {
+			type_pattern = opts.type_pattern,
+			configuration_pattern = opts.configuration_pattern,
+			use_last_target = opts.use_last_target,
+		}
+		vim.schedule_wrap(select_target)(dir, select_target_options, function(target)
 			if target == nil then
 				cancel_fidget("no target selected")
 				return
@@ -1153,7 +1263,12 @@ function M.uproject_build_plugins(dir, opts)
 			engine_dir, "Build", "BatchFiles", "Build.bat")
 
 
-		vim.schedule_wrap(select_target)(dir, { type_pattern = opts.type_pattern }, function(target)
+		local select_target_options = {
+			type_pattern = opts.type_pattern,
+			configuration_pattern = opts.configuration_pattern,
+			use_last_target = opts.use_last_target,
+		}
+		vim.schedule_wrap(select_target)(dir, select_target_options, function(target)
 			M.uproject_plugin_paths(dir, function(plugins)
 				for _, plugin in ipairs(plugins) do
 					local plugin_info = vim.fn.json_decode(vim.fn.readfile(plugin))
