@@ -81,8 +81,7 @@ local commands = {
 		M.show_last_output_buffer()
 	end,
 	unlock_build_dirs = function(opts)
-		local args = parse_fargs(opts.fargs, {})
-		M.uproject_unlock_build_dirs(vim.fn.getcwd(), args)
+		M.uproject_unlock_build_dirs(vim.fn.getcwd())
 	end,
 }
 
@@ -1517,7 +1516,9 @@ function M.uproject_unlock_build_dirs(dir, cb)
 				fidget_progress:finish()
 			end
 
-			cb()
+			if cb then
+				cb()
+			end
 		end
 
 		local function add_build_dir(build_dir)
@@ -1528,10 +1529,12 @@ function M.uproject_unlock_build_dirs(dir, cb)
 
 			vim.schedule(function()
 				append_output_buffer(output, { "  " .. build_dir })
-				unlock_dir(build_dir, { output = output, index = index }, function()
-					finished_unlocks = finished_unlocks + 1
-					fidget_progress.message = build_dir
-					check_done()
+				vim.schedule(function()
+					unlock_dir(build_dir, { output = output, index = index }, function()
+						finished_unlocks = finished_unlocks + 1
+						fidget_progress.message = build_dir
+						check_done()
+					end)
 				end)
 				vim.cmd.redraw()
 			end)
