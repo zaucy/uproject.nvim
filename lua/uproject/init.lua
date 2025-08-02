@@ -80,6 +80,10 @@ local commands = {
 		local args = parse_fargs(opts.fargs, {})
 		M.show_last_output_buffer()
 	end,
+	unlock_build_dirs = function(opts)
+		local args = parse_fargs(opts.fargs, { })
+		M.uproject_unlock_build_dirs(vim.fn.getcwd(), args)
+	end,
 }
 
 local function uproject_command(opts)
@@ -1300,6 +1304,188 @@ function M.uproject_build_plugins(dir, opts)
 				end
 			end)
 		end)
+	end)
+end
+
+local function get_build_dirs(dir, result)
+	local handle = vim.uv.fs_scandir(dir)
+	if not handle then return end
+
+  while true do
+    local name, type = vim.uv.fs_scandir_next(handle)
+    if not name then break end
+
+    local full_path = dir .. "/" .. name
+    if type == "directory" then
+      if name == "Intermediate" or name == "Binaries" then
+        table.insert(result, full_path)
+	else
+		get_build_dirs(full_path, result)
+      end
+    end
+  end
+end
+
+local function unlock_dir(build_dir, opts, cb)
+	local function update_with_prefix(prefix)
+		vim.api.nvim_set_option_value("modifiable", true, { buf = opts.output })
+		vim.api.nvim_buf_set_lines(opts.output, opts.index, opts.index + 1, true, {
+			string.format("%s %s", prefix, build_dir),
+		})
+		vim.api.nvim_set_option_value("modifiable", false, { buf = opts.output })
+	end
+
+	local has_fidget, fidget = pcall(require, 'fidget')
+	local timer = vim.uv.new_timer()
+
+	if timer and has_fidget and fidget then
+		local anim = fidget.spinner.animate("dots")
+		local time = 0
+		timer:start(0, 100, function()
+			vim.schedule(function()
+				time = time + 1
+				update_with_prefix(anim(time) .. " ")
+			end)
+		end)
+	else
+		update_with_prefix(" ")
+	end
+
+	local callbacks_done = 0
+	local expected_callbacks_done = 2
+
+	local function check_done(code)
+		callbacks_done = callbacks_done + 1
+
+		if callbacks_done ~= expected_callbacks_done then
+			return
+		end
+
+		if timer then
+			vim.uv.timer_stop(timer)
+		end
+
+		if code == 0 then
+			vim.schedule(function()
+				update_with_prefix("✔ ")
+				cb()
+			end)
+		else
+			vim.schedule(function()
+				update_with_prefix(" ")
+				cb()
+			end)
+		end
+	end
+
+	vim.uv.spawn("icacls", {
+		args = {
+			vim.fs.abspath(build_dir) .. "\\*",
+			"/grant",
+			"Everyone:F",
+			"/T",
+			"/C",
+		},
+	}, check_done)
+
+	vim.uv.spawn("attrib", {
+		args = {
+			"-R",
+			vim.fs.abspath(build_dir) .. "\\*",
+			"/S",
+		},
+	}, check_done)
+end
+
+--- possibly not useful for most people, but when using perforce and submitted
+--- intermediate/binaries this can be useful for unlocking files needed to
+--- build that you don't intend to submit.
+function M.uproject_unlock_build_dirs(dir, cb)
+	local project_path = M.uproject_path(dir)
+	if project_path == nil then
+		vim.notify("cannot find uproject in " .. dir, vim.log.levels.ERROR)
+		return
+	end
+	local project_dir = vim.fs.dirname(project_path)
+
+	local engine_association = M.uproject_engine_association(project_dir)
+	if engine_association.kind == "none" then
+		return
+	end
+
+	local output = make_output_buffer("unlocking project and engine build directories...")
+	vim.api.nvim_win_set_buf(0, output)
+
+	local has_fidget, fidget = pcall(require, 'fidget')
+	local fidget_progress = nil
+
+	if has_fidget then
+		fidget_progress = fidget.progress.handle.create({
+			key = "UProjectUnlockBuildDirs",
+			title = "󰦱 Unlocking Build Directories ",
+			message = "",
+			lsp_client = { name = "uproject.nvim" },
+			percentage = 0,
+			cancellable = true,
+		})
+	end
+
+	local function cancel_fidget(reason)
+		if has_fidget then
+			---@diagnostic disable-next-line: need-check-nil
+			fidget_progress.message = reason
+			---@diagnostic disable-next-line: need-check-nil
+			fidget_progress:cancel()
+		end
+	end
+
+	M.unreal_engine_install_dir(engine_association, function(install_dir)
+		if not install_dir then
+			cancel_fidget("cannot find engine install directory")
+			return
+		end
+
+		local engine_dir = vim.fs.joinpath(install_dir, "Engine")
+		local engine_plugins_dir = vim.fs.joinpath(engine_dir, "Plugins")
+		local project_plugins_dir = vim.fs.joinpath(project_dir, "Plugins")
+
+		local build_dirs = {
+			vim.fs.joinpath(project_dir, "Binaries"),
+			vim.fs.joinpath(project_dir, "Intermediate"),
+			vim.fs.joinpath(engine_dir, "Intermediate"),
+		}
+		get_build_dirs(project_plugins_dir, build_dirs)
+		get_build_dirs(engine_plugins_dir, build_dirs)
+
+		for index, build_dir in ipairs(build_dirs) do
+			build_dirs[index] = vim.fs.normalize(vim.fn.fnamemodify(build_dir, ":."))
+		end
+
+		append_output_buffer(output, build_dirs)
+
+		local finished_unlocks = 0
+		local function check_done()
+			if fidget_progress then
+				fidget_progress.percentage = (finished_unlocks / #build_dirs) * 100
+			end
+
+			if finished_unlocks ~= #build_dirs then
+				return;
+			end
+
+			if fidget_progress then
+				fidget_progress:finish()
+			end
+		end
+
+
+		for index, build_dir in ipairs(build_dirs) do
+			unlock_dir(build_dir, {output = output, index = index}, function()
+				finished_unlocks = finished_unlocks + 1
+				fidget_progress.message = build_dir
+				check_done()
+			end)
+		end
 	end)
 end
 
