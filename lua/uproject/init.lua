@@ -963,6 +963,35 @@ function M.uproject_reload(dir, opts)
 	end
 end
 
+local function any_project_binary_is_ro(project_dir)
+	local project_binaries_dir = vim.fs.joinpath(project_dir, "Binaries")
+	local function scan_dir(d)
+		local fs = vim.uv.fs_scandir(d)
+		if not fs then
+			return nil
+		end
+		while true do
+			local name, t = vim.uv.fs_scandir_next(fs)
+			if not name then
+				break
+			end
+			local full_path = d .. "/" .. name
+			if t == "file" then
+				if not vim.uv.fs_access(full_path, "W") then
+					return true
+				end
+			elseif t == "directory" then
+				local result = scan_dir(full_path)
+				if result then
+					return result
+				end
+			end
+		end
+		return false
+	end
+	return scan_dir(project_binaries_dir)
+end
+
 --- @class UprojectBuildOptions
 --- @field ignore_junk boolean|nil
 --- @field type_pattern string|nil
@@ -975,6 +1004,7 @@ end
 --- @field skip_rules_compile boolean|nil
 --- @field skip_pre_build_targets boolean|nil
 --- @field use_last_target boolean|nil
+--- @field unlock "never"|"always"|"auto"|nil|boolean
 --- @field env table<string, any>|nil environment variables used when spawning UnrealBuildTool
 
 --- @param dir string|nil
@@ -993,13 +1023,38 @@ function M.uproject_build(dir, opts)
 		skip_pre_build_targets = false,
 		env = nil,
 		use_last_target = false,
+		unlock = "never",
 	}, opts)
+
+	assert(
+		type(opts.unlock) == "boolean" or opts.unlock == "never" or opts.unlock == "auto" or opts.unlock == "always",
+		string.format("unexpected unlock value: %s", vim.inspect(opts.unlock))
+	)
+
+	if opts.unlock == "always" then
+		opts.unlock = "never"
+		M.uproject_unlock_build_dirs(dir, function()
+			M.uproject_build(dir, opts)
+		end)
+		return
+	end
+
 	local project_path = M.uproject_path(dir)
 	if project_path == nil then
 		vim.notify("cannot find uproject in " .. dir, vim.log.levels.ERROR)
 		return
 	end
 	dir = vim.fs.dirname(project_path)
+
+	if opts.unlock == "auto" or opts.unlock == true then
+		if any_project_binary_is_ro(dir) then
+			opts.unlock = "never"
+			M.uproject_unlock_build_dirs(dir, function()
+				M.uproject_build(dir, opts)
+			end)
+			return
+		end
+	end
 
 	local project_root = Path:new(vim.fs.dirname(project_path))
 	---@diagnostic disable-next-line: redefined-local
@@ -1461,6 +1516,8 @@ function M.uproject_unlock_build_dirs(dir, cb)
 			if fidget_progress then
 				fidget_progress:finish()
 			end
+
+			cb()
 		end
 
 		local function add_build_dir(build_dir)
