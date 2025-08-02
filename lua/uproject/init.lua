@@ -81,7 +81,7 @@ local commands = {
 		M.show_last_output_buffer()
 	end,
 	unlock_build_dirs = function(opts)
-		local args = parse_fargs(opts.fargs, { })
+		local args = parse_fargs(opts.fargs, {})
 		M.uproject_unlock_build_dirs(vim.fn.getcwd(), args)
 	end,
 }
@@ -103,7 +103,6 @@ local function get_available_platforms(cb)
 	end)
 end
 
-
 --- @param target any
 --- @param platform string
 --- @param cb fun(configurations: string[])
@@ -120,11 +119,17 @@ end
 
 local _last_selected_target = nil
 local function select_target(dir, opts, cb)
-	opts = vim.tbl_extend('force', { type_pattern = ".*", configuration_pattern = ".*", include_engine_targets = false, use_last_target = false }, opts)
+	opts = vim.tbl_extend(
+		"force",
+		{ type_pattern = ".*", configuration_pattern = ".*", include_engine_targets = false, use_last_target = false },
+		opts
+	)
 
 	if opts.use_last_target and _last_selected_target then
 		local target = vim.deepcopy(_last_selected_target, true)
-		vim.schedule(function() cb(target) end)
+		vim.schedule(function()
+			cb(target)
+		end)
 		return
 	end
 
@@ -149,8 +154,10 @@ local function select_target(dir, opts, cb)
 
 	if #targets == 0 then
 		if opts.type_pattern then
-			vim.notify("no uproject targets with type pattern '" .. opts.type_pattern .. "' found in " .. dir,
-				vim.log.levels.ERROR)
+			vim.notify(
+				"no uproject targets with type pattern '" .. opts.type_pattern .. "' found in " .. dir,
+				vim.log.levels.ERROR
+			)
 		else
 			vim.notify("no uproject targets found in " .. dir, vim.log.levels.ERROR)
 		end
@@ -163,7 +170,7 @@ local function select_target(dir, opts, cb)
 
 	local function check_done()
 		if finished_callbacks ~= expected_num_callbacks then
-			return;
+			return
 		end
 
 		select_options = vim.tbl_filter(function(target)
@@ -173,8 +180,13 @@ local function select_target(dir, opts, cb)
 
 		if #targets == 0 then
 			if opts.configuration_pattern then
-				vim.notify("no uproject targets with configuration pattern '" .. opts.configuration_pattern .. "' found in " .. dir,
-					vim.log.levels.ERROR)
+				vim.notify(
+					"no uproject targets with configuration pattern '"
+						.. opts.configuration_pattern
+						.. "' found in "
+						.. dir,
+					vim.log.levels.ERROR
+				)
 			else
 				vim.notify("no uproject targets found in " .. dir, vim.log.levels.ERROR)
 			end
@@ -189,14 +201,21 @@ local function select_target(dir, opts, cb)
 
 		local max_prefix = 0
 		for _, target in ipairs(select_options) do
-			max_prefix = math.max(max_prefix, #string.format("%s %s %s", target.Name, target.Platform, target.Configuration))
+			max_prefix =
+				math.max(max_prefix, #string.format("%s %s %s", target.Name, target.Platform, target.Configuration))
 		end
 
 		vim.ui.select(select_options, {
 			prompt = "Select Uproject Target",
 			format_item = function(target)
-				return string.format("%s %s %-" .. max_prefix .. "s Type=%s", target.Name, target.Platform, target.Configuration, target.Type)
-			end
+				return string.format(
+					"%s %s %-" .. max_prefix .. "s Type=%s",
+					target.Name,
+					target.Platform,
+					target.Configuration,
+					target.Type
+				)
+			end,
 		}, function(selected)
 			_last_selected_target = selected
 			cb(selected)
@@ -209,7 +228,7 @@ local function select_target(dir, opts, cb)
 		for _, platform in ipairs(platforms) do
 			for _, target in ipairs(targets) do
 				local target_option = vim.deepcopy(target, true)
-				target_option.Platform = platform;
+				target_option.Platform = platform
 				expected_num_callbacks = expected_num_callbacks + 1
 				get_available_target_configurations(target, platform, function(configurations)
 					finished_callbacks = finished_callbacks + 1
@@ -259,9 +278,7 @@ local function is_comment_line(line)
 end
 
 local function is_warn_line(line)
-	return false
-		or line:find("warning", 0, true) ~= nil
-		or line:find("Warning:", 0, true) ~= nil
+	return false or line:find("warning", 0, true) ~= nil or line:find("Warning:", 0, true) ~= nil
 end
 
 ---@param bufnr number
@@ -303,7 +320,6 @@ local function append_output_buffer(bufnr, lines)
 	end
 end
 
-
 ---@param lines string[]
 ---@param project_root Path
 local function transform_output_lines(lines, project_root)
@@ -331,13 +347,12 @@ local function spawn_output_buffer(opts, cb)
 	local project_root = opts.project_root
 	local progress = opts.progress
 
-	local output = make_output_buffer(
-		vim.fn.shellescape(cmd) .. " " ..
-		vim.fn.join(
-			vim.tbl_map(function(v) return vim.fn.shellescape(v) end, args),
-			" "
-		)
-	)
+	local output = make_output_buffer(vim.fn.shellescape(cmd) .. " " .. vim.fn.join(
+		vim.tbl_map(function(v)
+			return vim.fn.shellescape(v)
+		end, args),
+		" "
+	))
 	local output_append = vim.schedule_wrap(function(lines)
 		if progress then
 			for _, line in ipairs(lines) do
@@ -397,12 +412,14 @@ end
 
 function M.uproject_path(dir)
 	assert(dir ~= nil, "uproject_path first param must be a directory")
-	local matcher = function(name) return name:match('%.uproject$') ~= nil end
+	local matcher = function(name)
+		return name:match("%.uproject$") ~= nil
+	end
 	local root = vim.fs.root(dir, matcher)
 	if not root then
 		return nil, nil
 	end
-	local path = vim.fs.find(matcher, { path = root, type = 'file' })
+	local path = vim.fs.find(matcher, { path = root, type = "file" })
 	if #path == 1 then
 		return path[1], root
 	end
@@ -445,7 +462,7 @@ function M.uproject_engine_association(dir)
 	local info = vim.fn.json_decode(vim.fn.readfile(p))
 	return {
 		kind = "system",
-		version = info["EngineAssociation"]
+		version = info["EngineAssociation"],
 	}
 end
 
@@ -461,25 +478,28 @@ function M.unreal_engine_install_dir(engine_association, cb)
 		return
 	end
 
-
 	local stdout = vim.uv.new_pipe()
 	local stdout_str = ""
 	local spawn_opts = {
 		stdio = { nil, stdout, nil },
 		args = {
-			'query',
-			'HKLM\\SOFTWARE\\EpicGames\\Unreal Engine\\' .. engine_association.version,
-			'/v', 'InstalledDirectory',
+			"query",
+			"HKLM\\SOFTWARE\\EpicGames\\Unreal Engine\\" .. engine_association.version,
+			"/v",
+			"InstalledDirectory",
 		},
 	}
-	vim.uv.spawn('reg', spawn_opts, function(_, _)
-		local lines = vim.split(stdout_str, '\r\n', { trimempty = true })
+	vim.uv.spawn("reg", spawn_opts, function(_, _)
+		local lines = vim.split(stdout_str, "\r\n", { trimempty = true })
 		if #lines == 0 then
-			vim.notify("cannot find unreal " .. engine_association.version .. " install directory", vim.log.levels.ERROR)
+			vim.notify(
+				"cannot find unreal " .. engine_association.version .. " install directory",
+				vim.log.levels.ERROR
+			)
 			vim.schedule_wrap(cb)(nil)
 			return
 		end
-		local value = vim.split(lines[2], '%s+', { trimempty = true })[3]
+		local value = vim.split(lines[2], "%s+", { trimempty = true })[3]
 		vim.schedule_wrap(cb)(value)
 	end)
 
@@ -500,7 +520,7 @@ end
 --- @param dir string|nil
 --- @param opts UprojectOpenOptions
 function M.uproject_open(dir, opts)
-	opts = vim.tbl_extend('force', {
+	opts = vim.tbl_extend("force", {
 		debug = false,
 		env = nil,
 		log_cmds = nil,
@@ -522,8 +542,7 @@ function M.uproject_open(dir, opts)
 
 	M.unreal_engine_install_dir(engine_association, function(install_dir)
 		local engine_dir = vim.fs.joinpath(install_dir, "Engine")
-		local ue = vim.fs.joinpath(
-			engine_dir, "Binaries", "Win64", "UnrealEditor.exe")
+		local ue = vim.fs.joinpath(engine_dir, "Binaries", "Win64", "UnrealEditor.exe")
 
 		local args = {
 			project_path:absolute(),
@@ -541,22 +560,20 @@ function M.uproject_open(dir, opts)
 				hide = true,
 				args = args,
 				env = opts.env,
-			}, function(code, _)
-			end)
+			}, function(code, _) end)
 		else
 			vim.uv.spawn(ue, {
 				detached = true,
 				hide = true,
 				args = args,
 				env = opts.env,
-			}, function(code, _)
-			end)
+			}, function(code, _) end)
 		end
 	end)
 end
 
 function M.uproject_play(dir, opts)
-	opts = vim.tbl_extend('force', {}, opts)
+	opts = vim.tbl_extend("force", {}, opts)
 	local project_path = M.uproject_path(dir)
 	if project_path == nil then
 		vim.notify("cannot find uproject in " .. dir, vim.log.levels.ERROR)
@@ -586,8 +603,7 @@ function M.uproject_play(dir, opts)
 
 	M.unreal_engine_install_dir(engine_association, function(install_dir)
 		local engine_dir = vim.fs.joinpath(install_dir, "Engine")
-		local ue = vim.fs.joinpath(
-			engine_dir, "Binaries", "Win64", "UnrealEditor-Cmd.exe")
+		local ue = vim.fs.joinpath(engine_dir, "Binaries", "Win64", "UnrealEditor-Cmd.exe")
 		if opts.debug then
 			table.insert(args, 1, ue)
 			table.insert(args, 1, "launch")
@@ -621,8 +637,8 @@ function M.uproject_plugin_paths(dir, cb)
 	local plugin_dirs = vim.fn.readdir(vim.fs.joinpath(dir, "Plugins"))
 	local plugins = {}
 	for _, plugin_dir in ipairs(plugin_dirs) do
-		local plugin_file = vim.fs.joinpath(plugins_dir, vim.fs.basename(plugin_dir),
-			vim.fs.basename(plugin_dir) .. ".uplugin")
+		local plugin_file =
+			vim.fs.joinpath(plugins_dir, vim.fs.basename(plugin_dir), vim.fs.basename(plugin_dir) .. ".uplugin")
 		if vim.fn.exists(plugin_file) then
 			table.insert(plugins, plugin_file)
 		end
@@ -688,10 +704,7 @@ local function collect_public_headers(dir)
 	for type, subdir in vim.fs.dir(dir, { depth = nil }) do
 		if type == "directory" then
 			local public_dir = vim.fs.joinpath(subdir, "Public")
-			vim.list_extend(
-				all_headers,
-				vim.fs.find("*.h", { type = "file", path = public_dir, limit = math.huge })
-			)
+			vim.list_extend(all_headers, vim.fs.find("*.h", { type = "file", path = public_dir, limit = math.huge }))
 		end
 	end
 
@@ -710,20 +723,11 @@ function M.get_unreal_headers(dir, cb)
 
 		local all_headers = {}
 
-		vim.list_extend(
-			all_headers,
-			collect_public_headers(vim.fs.joinpath(source_dir, "Developer"))
-		)
+		vim.list_extend(all_headers, collect_public_headers(vim.fs.joinpath(source_dir, "Developer")))
 
-		vim.list_extend(
-			all_headers,
-			collect_public_headers(vim.fs.joinpath(source_dir, "Editor"))
-		)
+		vim.list_extend(all_headers, collect_public_headers(vim.fs.joinpath(source_dir, "Editor")))
 
-		vim.list_extend(
-			all_headers,
-			collect_public_headers(vim.fs.joinpath(source_dir, "Runtime"))
-		)
+		vim.list_extend(all_headers, collect_public_headers(vim.fs.joinpath(source_dir, "Runtime")))
 
 		-- TODO: plugins
 		local plugins_dir = vim.fs.joinpath(engine_dir, "Plugins")
@@ -739,10 +743,10 @@ function M.get_unreal_modules(dir, cb)
 		vim.uv.spawn(ubt, {
 			stdio = stdio,
 			args = {
-				'-Mode=Query',
+				"-Mode=Query",
 				-- '-RulesType=Module',
-				'-project=' .. project_path:absolute(),
-				'-stdout',
+				"-project=" .. project_path:absolute(),
+				"-stdout",
 				-- '-game',
 				-- '-engine',
 				-- '-Target=UnrealEditor Development Win64',
@@ -770,7 +774,7 @@ function M.get_unreal_modules(dir, cb)
 end
 
 function M.uproject_reload(dir, opts)
-	opts = vim.tbl_extend('force', { show_output = false }, opts)
+	opts = vim.tbl_extend("force", { show_output = false }, opts)
 	local project_path = M.uproject_path(dir)
 	if project_path == nil then
 		if opts.show_output then
@@ -796,10 +800,7 @@ function M.uproject_reload(dir, opts)
 			return
 		end
 
-		append_output_buffer(
-			output,
-			transform_output_lines(lines, project_root)
-		)
+		append_output_buffer(output, transform_output_lines(lines, project_root))
 	end
 
 	local output_append = vim.schedule_wrap(function(lines)
@@ -807,12 +808,8 @@ function M.uproject_reload(dir, opts)
 			return
 		end
 
-		append_output_buffer(
-			output,
-			transform_output_lines(lines, project_root)
-		)
+		append_output_buffer(output, transform_output_lines(lines, project_root))
 	end)
-
 
 	local engine_association = M.uproject_engine_association(dir)
 
@@ -822,7 +819,7 @@ function M.uproject_reload(dir, opts)
 	end
 
 	if engine_association ~= nil then
-		local has_fidget, fidget = pcall(require, 'fidget')
+		local has_fidget, fidget = pcall(require, "fidget")
 		local fidget_progress = nil
 
 		if has_fidget then
@@ -869,11 +866,9 @@ function M.uproject_reload(dir, opts)
 			end
 			local engine_dir = vim.fs.joinpath(install_dir, "Engine")
 			local ubt = vim.fs.joinpath(engine_dir, "Binaries", "DotNET", "UnrealBuildTool", "UnrealBuildTool.exe")
-			local build_bat = vim.fs.joinpath(
-				engine_dir, "Build", "BatchFiles", "Build.bat")
+			local build_bat = vim.fs.joinpath(engine_dir, "Build", "BatchFiles", "Build.bat")
 
-			local uat_bat = vim.fs.joinpath(
-				engine_dir, "Build", "BatchFiles", "RunUAT.bat")
+			local uat_bat = vim.fs.joinpath(engine_dir, "Build", "BatchFiles", "RunUAT.bat")
 
 			local stdio = { nil, nil, nil }
 
@@ -891,11 +886,11 @@ function M.uproject_reload(dir, opts)
 				function(step_done)
 					notify_info("Generating compile_commands.json", true)
 					local args = {
-						'-mode=GenerateClangDatabase',
-						'-project=' .. project_path:absolute(),
-						'-game',
-						'-engine',
-						'-Target=UnrealEditor Development Win64',
+						"-mode=GenerateClangDatabase",
+						"-project=" .. project_path:absolute(),
+						"-game",
+						"-engine",
+						"-Target=UnrealEditor Development Win64",
 					}
 					output_append({ ubt .. " " .. vim.fn.join(args, " ") })
 					vim.uv.spawn(ubt, {
@@ -907,9 +902,11 @@ function M.uproject_reload(dir, opts)
 						else
 							notify_info("Copying compile_commands.json to project root")
 							vim.uv.fs_copyfile(
-								vim.fs.joinpath(install_dir, 'compile_commands.json'),
-								vim.fs.joinpath(tostring(vim.fs.dirname(project_path:absolute())),
-									'compile_commands.json'),
+								vim.fs.joinpath(install_dir, "compile_commands.json"),
+								vim.fs.joinpath(
+									tostring(vim.fs.dirname(project_path:absolute())),
+									"compile_commands.json"
+								),
 								function(err)
 									if err then
 										notify_error(err)
@@ -923,7 +920,7 @@ function M.uproject_reload(dir, opts)
 						end
 						step_done()
 					end)
-				end
+				end,
 			}
 
 			local current_step_index = 1
@@ -983,7 +980,7 @@ end
 --- @param dir string|nil
 --- @param opts UprojectBuildOptions
 function M.uproject_build(dir, opts)
-	opts = vim.tbl_extend('force', {
+	opts = vim.tbl_extend("force", {
 		ignore_junk = false,
 		type_pattern = nil,
 		configuration_pattern = nil,
@@ -1013,8 +1010,7 @@ function M.uproject_build(dir, opts)
 		return
 	end
 
-
-	local has_fidget, fidget = pcall(require, 'fidget')
+	local has_fidget, fidget = pcall(require, "fidget")
 	local fidget_progress = nil
 
 	if has_fidget then
@@ -1044,8 +1040,7 @@ function M.uproject_build(dir, opts)
 		end
 
 		local engine_dir = vim.fs.joinpath(install_dir, "Engine")
-		local build_bat = vim.fs.joinpath(
-			engine_dir, "Build", "BatchFiles", "Build.bat")
+		local build_bat = vim.fs.joinpath(engine_dir, "Build", "BatchFiles", "Build.bat")
 
 		local select_target_options = {
 			type_pattern = opts.type_pattern,
@@ -1059,7 +1054,8 @@ function M.uproject_build(dir, opts)
 			end
 
 			if fidget_progress then
-				fidget_progress.title = string.format("󰦱 %s %s %s ", target.Name, target.Platform, target.Configuration)
+				fidget_progress.title =
+					string.format("󰦱 %s %s %s ", target.Name, target.Platform, target.Configuration)
 			end
 
 			local args = {
@@ -1132,7 +1128,7 @@ end
 --- @param dir string|nil
 --- @param opts UprojectCleanOptions
 function M.uproject_clean(dir, opts)
-	opts = vim.tbl_extend('force', {
+	opts = vim.tbl_extend("force", {
 		env = nil,
 		type_pattern = nil,
 	}, opts)
@@ -1152,8 +1148,7 @@ function M.uproject_clean(dir, opts)
 		return
 	end
 
-
-	local has_fidget, fidget = pcall(require, 'fidget')
+	local has_fidget, fidget = pcall(require, "fidget")
 	local fidget_progress = nil
 
 	if has_fidget then
@@ -1183,8 +1178,7 @@ function M.uproject_clean(dir, opts)
 		end
 
 		local engine_dir = vim.fs.joinpath(install_dir, "Engine")
-		local clean_bat = vim.fs.joinpath(
-			engine_dir, "Build", "BatchFiles", "Clean.bat")
+		local clean_bat = vim.fs.joinpath(engine_dir, "Build", "BatchFiles", "Clean.bat")
 
 		local select_target_options = {
 			type_pattern = opts.type_pattern,
@@ -1241,8 +1235,11 @@ function M.uproject_clean(dir, opts)
 end
 
 function M.uproject_build_plugins(dir, opts)
-	opts = vim.tbl_extend('force',
-		{ ignore_junk = false, type_pattern = nil, close_output_on_success = false, wait = false }, opts)
+	opts = vim.tbl_extend(
+		"force",
+		{ ignore_junk = false, type_pattern = nil, close_output_on_success = false, wait = false },
+		opts
+	)
 	local project_path = M.uproject_path(dir)
 	if project_path == nil then
 		vim.notify("cannot find uproject in " .. dir, vim.log.levels.ERROR)
@@ -1263,9 +1260,7 @@ function M.uproject_build_plugins(dir, opts)
 			return
 		end
 		local engine_dir = vim.fs.joinpath(install_dir, "Engine")
-		local build_bat = vim.fs.joinpath(
-			engine_dir, "Build", "BatchFiles", "Build.bat")
-
+		local build_bat = vim.fs.joinpath(engine_dir, "Build", "BatchFiles", "Build.bat")
 
 		local select_target_options = {
 			type_pattern = opts.type_pattern,
@@ -1309,21 +1304,25 @@ end
 
 local function get_build_dirs(dir, result)
 	local handle = vim.uv.fs_scandir(dir)
-	if not handle then return end
+	if not handle then
+		return
+	end
 
-  while true do
-    local name, type = vim.uv.fs_scandir_next(handle)
-    if not name then break end
+	while true do
+		local name, type = vim.uv.fs_scandir_next(handle)
+		if not name then
+			break
+		end
 
-    local full_path = dir .. "/" .. name
-    if type == "directory" then
-      if name == "Intermediate" or name == "Binaries" then
-        table.insert(result, full_path)
-	else
-		get_build_dirs(full_path, result)
-      end
-    end
-  end
+		local full_path = dir .. "/" .. name
+		if type == "directory" then
+			if name == "Intermediate" or name == "Binaries" then
+				table.insert(result, full_path)
+			else
+				get_build_dirs(full_path, result)
+			end
+		end
+	end
 end
 
 local function unlock_dir(build_dir, opts, cb)
@@ -1335,7 +1334,7 @@ local function unlock_dir(build_dir, opts, cb)
 		vim.api.nvim_set_option_value("modifiable", false, { buf = opts.output })
 	end
 
-	local has_fidget, fidget = pcall(require, 'fidget')
+	local has_fidget, fidget = pcall(require, "fidget")
 	local timer = vim.uv.new_timer()
 
 	if timer and has_fidget and fidget then
@@ -1416,7 +1415,7 @@ function M.uproject_unlock_build_dirs(dir, cb)
 	local output = make_output_buffer("unlocking project and engine build directories...")
 	vim.api.nvim_win_set_buf(0, output)
 
-	local has_fidget, fidget = pcall(require, 'fidget')
+	local has_fidget, fidget = pcall(require, "fidget")
 	local fidget_progress = nil
 
 	if has_fidget then
@@ -1470,7 +1469,7 @@ function M.uproject_unlock_build_dirs(dir, cb)
 			end
 
 			if finished_unlocks ~= #build_dirs then
-				return;
+				return
 			end
 
 			if fidget_progress then
@@ -1478,9 +1477,8 @@ function M.uproject_unlock_build_dirs(dir, cb)
 			end
 		end
 
-
 		for index, build_dir in ipairs(build_dirs) do
-			unlock_dir(build_dir, {output = output, index = index}, function()
+			unlock_dir(build_dir, { output = output, index = index }, function()
 				finished_unlocks = finished_unlocks + 1
 				fidget_progress.message = build_dir
 				check_done()
@@ -1504,7 +1502,7 @@ function M.setup(opts)
 	})
 
 	vim.api.nvim_create_user_command("Uproject", uproject_command, {
-		nargs = '+',
+		nargs = "+",
 		desc = "Build, play or open an Unreal project",
 		complete = function()
 			return vim.tbl_keys(commands)
