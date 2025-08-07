@@ -13,6 +13,7 @@ Install with lazy
 	"zaucy/uproject.nvim",
 	dependencies = {
 		'nvim-lua/plenary.nvim',
+		'lewis6991/async.nvim',
 		"j-hui/fidget.nvim", -- optional
 	},
 	cmd = { "Uproject" },
