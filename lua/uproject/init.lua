@@ -524,6 +524,7 @@ end
 --- @field log_cmds string|nil
 --- @field env table<string, any>|nil environment variables used when spawning
 
+--- @async
 --- @param dir string|nil
 --- @param opts UprojectOpenOptions
 function M.uproject_open(dir, opts)
@@ -547,36 +548,35 @@ function M.uproject_open(dir, opts)
 		return
 	end
 
-	M.unreal_engine_install_dir(engine_association, function(install_dir)
-		local engine_dir = vim.fs.joinpath(install_dir, "Engine")
-		local ue = vim.fs.joinpath(engine_dir, "Binaries", "Win64", "UnrealEditor.exe")
+	local install_dir = M.unreal_engine_install_dir(engine_association)
+	local engine_dir = vim.fs.joinpath(install_dir, "Engine")
+	local ue = vim.fs.joinpath(engine_dir, "Binaries", "Win64", "UnrealEditor.exe")
 
-		local args = {
-			project_path:absolute(),
-		}
+	local args = {
+		project_path:absolute(),
+	}
 
-		if opts.log_cmds then
-			table.insert(args, "-LogCmds=" .. opts.log_cmds)
-		end
+	if opts.log_cmds then
+		table.insert(args, "-LogCmds=" .. opts.log_cmds)
+	end
 
-		if opts.debug then
-			table.insert(args, 1, ue)
-			table.insert(args, 1, "launch")
-			vim.uv.spawn("dbg", {
-				detached = true,
-				hide = true,
-				args = args,
-				env = opts.env,
-			}, function(code, _) end)
-		else
-			vim.uv.spawn(ue, {
-				detached = true,
-				hide = true,
-				args = args,
-				env = opts.env,
-			}, function(code, _) end)
-		end
-	end)
+	if opts.debug then
+		table.insert(args, 1, ue)
+		table.insert(args, 1, "launch")
+		vim.uv.spawn("dbg", {
+			detached = true,
+			hide = true,
+			args = args,
+			env = opts.env,
+		}, function(code, _) end)
+	else
+		vim.uv.spawn(ue, {
+			detached = true,
+			hide = true,
+			args = args,
+			env = opts.env,
+		}, function(code, _) end)
+	end
 end
 
 function M.uproject_play(dir, opts)
