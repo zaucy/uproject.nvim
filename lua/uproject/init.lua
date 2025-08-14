@@ -608,27 +608,26 @@ function M.uproject_play(dir, opts)
 		table.insert(args, "-LogCmds=" .. opts.log_cmds)
 	end
 
-	M.unreal_engine_install_dir(engine_association, function(install_dir)
-		local engine_dir = vim.fs.joinpath(install_dir, "Engine")
-		local ue = vim.fs.joinpath(engine_dir, "Binaries", "Win64", "UnrealEditor-Cmd.exe")
-		if opts.debug then
-			table.insert(args, 1, ue)
-			table.insert(args, 1, "launch")
-			local output = spawn_output_buffer({
-				cmd = "dbg",
-				args = args,
-				project_root = project_root,
-			})
-			vim.api.nvim_win_set_buf(0, output)
-		else
-			local output = spawn_output_buffer({
-				cmd = ue,
-				args = args,
-				project_root = project_root,
-			})
-			vim.api.nvim_win_set_buf(0, output)
-		end
-	end)
+	local install_dir = M.unreal_engine_install_dir(engine_association)
+	local engine_dir = vim.fs.joinpath(install_dir, "Engine")
+	local ue = vim.fs.joinpath(engine_dir, "Binaries", "Win64", "UnrealEditor-Cmd.exe")
+	if opts.debug then
+		table.insert(args, 1, ue)
+		table.insert(args, 1, "launch")
+		local output = spawn_output_buffer({
+			cmd = "dbg",
+			args = args,
+			project_root = project_root,
+		})
+		vim.api.nvim_win_set_buf(0, output)
+	else
+		local output = spawn_output_buffer({
+			cmd = ue,
+			args = args,
+			project_root = project_root,
+		})
+		vim.api.nvim_win_set_buf(0, output)
+	end
 end
 
 function M.uproject_plugin_paths(dir, cb)
