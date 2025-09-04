@@ -4,6 +4,7 @@ local async = require("async")
 
 local spawn_async = async.wrap(3, vim.uv.spawn)
 local fs_copyfile_async = async.wrap(3, vim.uv.fs_copyfile)
+local ui_select_async = async.wrap(3, vim.ui.select)
 
 local M = {}
 ---@param arg string
@@ -90,7 +91,7 @@ local commands = {
 }
 
 local function uproject_command(opts)
-	async.run(function()
+	local task = async.run(function()
 		local command = commands[opts.fargs[1]]
 		if command == nil then
 			return async.await(vim.schedule)
@@ -98,6 +99,8 @@ local function uproject_command(opts)
 
 		return command(opts)
 	end)
+
+	task:raise_on_error()
 end
 
 --- @param cb fun(platforms: string[])
@@ -122,7 +125,15 @@ local function get_available_target_configurations(target, platform, cb)
 	end)
 end
 
+--- @class uproject.SelectedTarget
+--- @field Name string
+--- @field Platform string
+--- @field Configuration "Debug"|"DebugGame"|"Development"|"Test"|"Shipping"
+--- @field Type string
+
 local _last_selected_target = nil
+
+--- @param cb fun(target: uproject.SelectedTarget)
 local function select_target(dir, opts, cb)
 	opts = vim.tbl_extend(
 		"force",
@@ -549,6 +560,10 @@ function M.uproject_open(dir, opts)
 	end
 
 	local install_dir = M.unreal_engine_install_dir(engine_association)
+	if install_dir == nil then
+		return
+	end
+
 	local engine_dir = vim.fs.joinpath(install_dir, "Engine")
 	local ue = vim.fs.joinpath(engine_dir, "Binaries", "Win64", "UnrealEditor.exe")
 
@@ -579,8 +594,32 @@ function M.uproject_open(dir, opts)
 	end
 end
 
+---Convert a .umap file path to Unreal's /Game/ style path
+---@param filepath string Full path or relative path to a .umap
+---@return string|nil asset_path The converted Unreal asset path, or nil if not a .umap
+local function umap_to_game_path(filepath)
+	if not filepath:match("%.umap$") then
+		return nil
+	end
+
+	-- Normalize slashes
+	local path = filepath:gsub("\\", "/")
+
+	-- Strip up to and including "Content/"
+	path = path:gsub(".*Content/", "/Game/")
+
+	-- Remove the .umap extension
+	path = path:gsub("%.umap$", "")
+
+	return path
+end
+
+--- @async
 function M.uproject_play(dir, opts)
+	async.await(vim.schedule)
+
 	opts = vim.tbl_extend("force", {}, opts)
+
 	local project_path = M.uproject_path(dir)
 	if project_path == nil then
 		vim.notify("cannot find uproject in " .. dir, vim.log.levels.ERROR)
@@ -591,6 +630,29 @@ function M.uproject_play(dir, opts)
 	local project_root = Path:new(vim.fs.dirname(project_path))
 	---@diagnostic disable-next-line: redefined-local
 	local project_path = Path:new(project_path)
+	local content_dir = vim.fs.joinpath(project_root.filename, "Content")
+
+	local umap_files = vim.fs.find(function(name, path)
+		return vim.endswith(name, ".umap")
+	end, { type = "file", path = content_dir, limit = math.huge })
+	table.insert(umap_files, 1, "")
+
+	local umap_file, umap_file_index = ui_select_async(umap_files, {
+		prompt = "umap (optional)",
+		format_item = function(file)
+			if file == "" then
+				return "(startup map)"
+			end
+
+			return umap_to_game_path(file) or "(invalid path)"
+		end,
+	})
+
+	async.await(vim.schedule)
+
+	if umap_file_index == nil then
+		return
+	end
 
 	local engine_association = M.uproject_engine_association(dir)
 	if engine_association.kind == "none" then
@@ -599,16 +661,25 @@ function M.uproject_play(dir, opts)
 
 	local args = {
 		project_path:absolute(),
-		"-Stdout",
-		"-FullStdOutLogOutput",
-		"-Game",
 	}
+
+	if umap_file_index ~= nil then
+		table.insert(args, umap_file)
+	end
+
+	table.insert(args, "-Stdout")
+	table.insert(args, "-FullStdOutLogOutput")
+	table.insert(args, "-Game")
 
 	if opts.log_cmds then
 		table.insert(args, "-LogCmds=" .. opts.log_cmds)
 	end
 
 	local install_dir = M.unreal_engine_install_dir(engine_association)
+	if install_dir == nil then
+		return
+	end
+
 	local engine_dir = vim.fs.joinpath(install_dir, "Engine")
 	local ue = vim.fs.joinpath(engine_dir, "Binaries", "Win64", "UnrealEditor-Cmd.exe")
 	if opts.debug then
@@ -971,6 +1042,7 @@ end
 --- @param dir string|nil
 --- @param opts UprojectBuildOptions
 function M.uproject_build(dir, opts)
+	async.await(vim.schedule)
 	opts = vim.tbl_extend("force", {
 		ignore_junk = false,
 		type_pattern = nil,
@@ -978,6 +1050,7 @@ function M.uproject_build(dir, opts)
 		close_output_on_success = false,
 		wait = false,
 		open = false,
+		play = false,
 		hide_output = false,
 		no_ubt_makefiles = false,
 		skip_rules_compile = false,
@@ -1100,6 +1173,8 @@ function M.uproject_build(dir, opts)
 
 		if opts.open and exit_code == 0 then
 			M.uproject_open(dir, {})
+		elseif opts.play and exit_code == 0 then
+			M.uproject_play(dir, {})
 		end
 
 		if exit_code ~= 0 then
@@ -1116,6 +1191,7 @@ function M.uproject_build(dir, opts)
 			end
 		end
 	end
+	-- async.await(vim.schedule)
 	output_bufnr = spawn_output_buffer({
 		cmd = build_bat,
 		args = args,
@@ -1126,6 +1202,9 @@ function M.uproject_build(dir, opts)
 	if not opts.hide_output then
 		vim.api.nvim_win_set_buf(0, output_bufnr)
 	end
+
+	async.await(vim.schedule)
+	async.await(vim.schedule)
 end
 
 --- @class UprojectCleanOptions
