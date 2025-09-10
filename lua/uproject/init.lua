@@ -949,8 +949,8 @@ function M.uproject_reload(dir, opts)
 
 	local stdio = { nil, nil, nil }
 
-	notify_info("Querying project targets", true)
 	async.await(vim.schedule)
+	notify_info("Querying project targets", true)
 	spawn_async(build_bat, {
 		stdio = stdio,
 		args = {
@@ -959,19 +959,22 @@ function M.uproject_reload(dir, opts)
 		},
 	})
 
-	notify_info("Generating compile_commands.json", true)
 	async.await(vim.schedule)
-	output_append({ ubt .. " " .. vim.fn.join(args, " ") })
+	notify_info("Generating compile_commands.json", true)
+
+	local ubt_args = {
+		"-mode=GenerateClangDatabase",
+		"-project=" .. project_path:absolute(),
+		"-game",
+		"-engine",
+		"-Target=UnrealEditor Development Win64",
+	}
+
+	output_append({ ubt .. " " .. vim.fn.join(ubt_args, " ") })
 
 	local ubt_exit_code = spawn_async(ubt, {
 		stdio = stdio,
-		args = {
-			"-mode=GenerateClangDatabase",
-			"-project=" .. project_path:absolute(),
-			"-game",
-			"-engine",
-			"-Target=UnrealEditor Development Win64",
-		},
+		args = ubt_args,
 	})
 
 	if ubt_exit_code ~= 0 then
