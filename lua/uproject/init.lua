@@ -1478,6 +1478,26 @@ local function unlock_dir(build_dir, opts, cb)
 	}, check_done)
 end
 
+local function get_all_build_dirs(dir, cb)
+	local build_dirs = {}
+	local finished_unlocks = 0
+	local wanted_unlocked = 0
+
+	local do_unlocks = async.wrap(1, function(cb)
+		local function add_build_dir(build_dir)
+			build_dir = vim.fs.normalize(vim.fn.fnamemodify(build_dir, ":."))
+			table.insert(build_dirs, build_dir)
+		end
+
+		add_build_dir(vim.fs.joinpath(project_dir, "Binaries"))
+		add_build_dir(vim.fs.joinpath(project_dir, "Intermediate"))
+		add_build_dir(vim.fs.joinpath(engine_dir, "Intermediate"))
+
+		walk_build_dirs(project_plugins_dir, add_build_dir)
+		walk_build_dirs(engine_plugins_dir, add_build_dir)
+	end)
+end
+
 --- possibly not useful for most people, but when using perforce and submitted
 --- intermediate/binaries this can be useful for unlocking files needed to
 --- build that you don't intend to submit.
@@ -1534,14 +1554,25 @@ function M.uproject_unlock_build_dirs(dir)
 	local build_dirs = {}
 	local finished_unlocks = 0
 	local wanted_unlocked = 0
+	local active_unlocks = 0
+	local pending_unlock_dir_indices = {}
+	local MAX_ACTIVE_UNLOCKS = 4
 
 	local do_unlocks = async.wrap(1, function(cb)
+		--- @type fun(build_dir: string, index: number)
+		local start_unlock = nil
+
 		local function check_done()
 			if fidget_progress then
 				fidget_progress.percentage = (finished_unlocks / #build_dirs) * 100
 			end
 
 			if finished_unlocks ~= wanted_unlocked then
+				if active_unlocks < MAX_ACTIVE_UNLOCKS and #pending_unlock_dir_indices > 0 then
+					local index = table.remove(pending_unlock_dir_indices, 1)
+					local build_dir = build_dirs[index]
+					start_unlock(build_dir, index)
+				end
 				return
 			end
 
@@ -1552,23 +1583,31 @@ function M.uproject_unlock_build_dirs(dir)
 			cb()
 		end
 
-		local function add_build_dir(build_dir)
-			build_dir = vim.fs.normalize(vim.fn.fnamemodify(build_dir, ":."))
-			table.insert(build_dirs, build_dir)
-			local index = #build_dirs
-			wanted_unlocked = wanted_unlocked + 1
-
+		start_unlock = function(build_dir, index)
+			active_unlocks = active_unlocks + 1
 			vim.schedule(function()
 				append_output_buffer(output, { "  " .. build_dir })
 				vim.schedule(function()
 					unlock_dir(build_dir, { output = output, index = index }, function()
 						finished_unlocks = finished_unlocks + 1
 						fidget_progress.message = build_dir
+
+						active_unlocks = active_unlocks - 1
 						check_done()
 					end)
 				end)
 				vim.cmd.redraw()
 			end)
+		end
+
+		local function add_build_dir(build_dir)
+			build_dir = vim.fs.normalize(vim.fn.fnamemodify(build_dir, ":."))
+			table.insert(build_dirs, build_dir)
+			local index = #build_dirs
+			wanted_unlocked = wanted_unlocked + 1
+
+			table.insert(pending_unlock_dir_indices, index)
+			check_done()
 		end
 
 		add_build_dir(vim.fs.joinpath(project_dir, "Binaries"))
@@ -1579,7 +1618,12 @@ function M.uproject_unlock_build_dirs(dir)
 		walk_build_dirs(engine_plugins_dir, add_build_dir)
 	end)
 
+	local unlock_start = vim.loop.hrtime()
 	do_unlocks()
+	local unlock_stop = vim.loop.hrtime()
+	local unlock_duration = (unlock_stop - unlock_start) / 1e6
+
+	append_output_buffer(output, { "", ("Done in %.2fms"):format(unlock_duration) })
 end
 
 function M.show_last_output_buffer()
