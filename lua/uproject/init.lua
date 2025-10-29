@@ -468,8 +468,9 @@ function M.uproject_engine_association(dir)
 		return { kind = "none" }
 	end
 
-	--- TODO: add configurable local engine installs or some more common locations
-	local local_engine_dir = vim.fs.joinpath(dir, "..", "InstalledEngine")
+	local info = vim.fn.json_decode(vim.fn.readfile(p))
+
+	local local_engine_dir = vim.fs.joinpath(dir, info["EngineAssociation"])
 	if vim.fn.isdirectory(local_engine_dir) == 1 then
 		return {
 			kind = "local",
@@ -477,7 +478,6 @@ function M.uproject_engine_association(dir)
 		}
 	end
 
-	local info = vim.fn.json_decode(vim.fn.readfile(p))
 	return {
 		kind = "system",
 		version = info["EngineAssociation"],
