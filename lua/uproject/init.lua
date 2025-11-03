@@ -1146,6 +1146,7 @@ function M.uproject_build(dir, opts)
 	local args = {
 		"-Project=" .. project_path:absolute(),
 		string.format("-Target=%s %s %s", target.Name, target.Platform, target.Configuration),
+		"-UsePrecompiled",
 	}
 
 	if opts.wait then
