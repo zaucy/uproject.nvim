@@ -67,6 +67,7 @@ local commands = {
 			"skip_pre_build_targets",
 			"clean",
 			"use_last_target",
+			"use_precompiled",
 		})
 		return M.uproject_build(vim.fn.getcwd(), args)
 	end,
@@ -1060,6 +1061,7 @@ function M.uproject_build(dir, opts)
 		skip_pre_build_targets = false,
 		env = nil,
 		use_last_target = false,
+		use_precompiled = false,
 		unlock = "never",
 	}, opts)
 
@@ -1146,7 +1148,6 @@ function M.uproject_build(dir, opts)
 	local args = {
 		"-Project=" .. project_path:absolute(),
 		string.format("-Target=%s %s %s", target.Name, target.Platform, target.Configuration),
-		"-UsePrecompiled",
 	}
 
 	if opts.wait then
@@ -1167,6 +1168,10 @@ function M.uproject_build(dir, opts)
 
 	if opts.skip_pre_build_targets then
 		table.insert(args, "-SkipPreBuildTargets")
+	end
+
+	if opts.use_precompiled then
+		table.insert(args, "-UsePrecompiled")
 	end
 
 	local output_bufnr = -1
