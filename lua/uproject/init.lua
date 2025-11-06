@@ -68,6 +68,7 @@ local commands = {
 			"clean",
 			"use_last_target",
 			"use_precompiled",
+			"uba_force_remote",
 		})
 		return M.uproject_build(vim.fn.getcwd(), args)
 	end,
@@ -1110,6 +1111,7 @@ function M.uproject_build(dir, opts)
 		env = nil,
 		use_last_target = false,
 		use_precompiled = false,
+		uba_force_remote = false,
 		unlock = "never",
 	}, opts)
 
@@ -1220,6 +1222,10 @@ function M.uproject_build(dir, opts)
 
 	if opts.use_precompiled then
 		table.insert(args, "-UsePrecompiled")
+	end
+
+	if opts.uba_force_remote then
+		table.insert(args, "-UBAForceRemote")
 	end
 
 	local output_bufnr = -1
