@@ -71,6 +71,10 @@ local commands = {
 		})
 		return M.uproject_build(vim.fn.getcwd(), args)
 	end,
+	submit = function(opts)
+		local args = parse_fargs(opts.fargs, {})
+		return M.uproject_submit(vim.fn.getcwd(), args)
+	end,
 	clean = function(opts)
 		local args = parse_fargs(opts.fargs, {
 			"type_pattern",
@@ -133,6 +137,7 @@ end
 --- @field Type string
 
 local _last_selected_target = nil
+local _last_selected_project_by_directory = {}
 
 --- @param cb fun(target: uproject.SelectedTarget)
 local function select_target(dir, opts, cb)
@@ -429,20 +434,56 @@ local function spawn_output_buffer(opts, cb)
 	return output
 end
 
+--- @async
 function M.uproject_path(dir)
 	assert(dir ~= nil, "uproject_path first param must be a directory")
 	local matcher = function(name)
 		return name:match("%.uproject$") ~= nil
 	end
 	local root = vim.fs.root(dir, matcher)
-	if not root then
+	if root then
+		local path = vim.fs.find(matcher, { path = root, type = "file" })
+		if #path == 1 then
+			return path[1], root
+		end
+	end
+
+	local default_uprojectdirs_path = vim.fs.joinpath(dir, "Default.uprojectdirs")
+	if vim.fn.filereadable(default_uprojectdirs_path) == 0 then
 		return nil, nil
 	end
-	local path = vim.fs.find(matcher, { path = root, type = "file" })
-	if #path == 1 then
-		return path[1], root
+	local project_dir_paths = vim.fn.readfile(default_uprojectdirs_path)
+	local project_paths = {}
+
+	for _, search_path in ipairs(project_dir_paths) do
+		search_path = vim.trim(search_path)
+		if not vim.startswith(search_path, ";") then
+			search_path = vim.fs.joinpath(vim.fs.dirname(default_uprojectdirs_path), search_path)
+			local project_roots = vim.fs.dir(search_path, {})
+
+			for project_root in project_roots do
+				project_root = vim.fs.joinpath(search_path, project_root)
+				local project_file = vim.fs.joinpath(project_root, vim.fs.basename(project_root) .. ".uproject")
+				if vim.fn.filereadable(project_file) == 1 then
+					table.insert(project_paths, vim.fs.relpath(dir, vim.fs.normalize(project_file)))
+				end
+			end
+		end
 	end
-	return nil, nil
+
+	if #project_paths == 0 then
+		return nil, nil
+	end
+
+	if #project_paths == 1 then
+		return project_paths[1], vim.fs.dirname(project_paths[1])
+	end
+
+	local selected_project = ui_select_async(project_paths, {
+		prompt = "Select project",
+	})
+
+	return selected_project, vim.fs.dirname(selected_project)
 end
 
 --- @class NoEngineAssociation
@@ -464,14 +505,14 @@ end
 --- @param dir string
 --- @return EngineAssociation
 function M.uproject_engine_association(dir)
-	local p = M.uproject_path(dir)
+	local p, root = M.uproject_path(dir)
 	if p == nil then
 		return { kind = "none" }
 	end
 
 	local info = vim.fn.json_decode(vim.fn.readfile(p))
 
-	local local_engine_dir = vim.fs.joinpath(dir, info["EngineAssociation"])
+	local local_engine_dir = vim.fs.joinpath(root, info["EngineAssociation"])
 	if vim.fn.isdirectory(local_engine_dir) == 1 then
 		return {
 			kind = "local",
@@ -586,12 +627,19 @@ function M.uproject_open(dir, opts)
 			env = opts.env,
 		}, function(code, _) end)
 	else
-		vim.uv.spawn(ue, {
-			detached = true,
-			hide = true,
+		local project_root = Path:new(dir)
+		local output = spawn_output_buffer({
+			cmd = ue,
 			args = args,
-			env = opts.env,
-		}, function(code, _) end)
+			project_root = project_root,
+		})
+		vim.api.nvim_win_set_buf(0, output)
+		-- vim.uv.spawn(ue, {
+		-- 	detached = true,
+		-- 	hide = true,
+		-- 	args = args,
+		-- 	env = opts.env,
+		-- }, function(code, _) end)
 	end
 end
 
@@ -1211,6 +1259,78 @@ function M.uproject_build(dir, opts)
 	if not opts.hide_output then
 		vim.api.nvim_win_set_buf(0, output_bufnr)
 	end
+
+	async.await(vim.schedule)
+	async.await(vim.schedule)
+end
+
+function M.uproject_submit(dir, opts)
+	local project_path = M.uproject_path(dir)
+	if project_path == nil then
+		vim.notify("cannot find uproject in " .. dir, vim.log.levels.ERROR)
+		return
+	end
+	local project_dir = vim.fs.dirname(project_path)
+
+	local engine_association = M.uproject_engine_association(project_dir)
+	if engine_association.kind == "none" then
+		return
+	end
+
+	local has_fidget, fidget = pcall(require, "fidget")
+	local fidget_progress = nil
+
+	if has_fidget then
+		fidget_progress = fidget.progress.handle.create({
+			key = "UProjectSubmit",
+			title = "󰦱 Running Submit Tool ",
+			message = "",
+			lsp_client = { name = "uproject.nvim" },
+			percentage = 0,
+			cancellable = true,
+		})
+	end
+
+	local function cancel_fidget(reason)
+		if has_fidget then
+			---@diagnostic disable-next-line: need-check-nil
+			fidget_progress.message = reason
+			---@diagnostic disable-next-line: need-check-nil
+			fidget_progress:cancel()
+		end
+	end
+
+	local install_dir = M.unreal_engine_install_dir(engine_association)
+	if not install_dir then
+		cancel_fidget("cannot find engine install directory")
+		return
+	end
+
+	local engine_dir = vim.fs.joinpath(install_dir, "Engine")
+	local submit_tool_executable = vim.fs.joinpath(engine_dir, "Binaries", "Win64", "SubmitTool.exe")
+
+	if vim.fn.filereadable(submit_tool_executable) == 0 then
+		cancel_fidget("cannot find submit tool")
+		return
+	end
+
+	local project_root = Path:new(vim.fs.dirname(project_path))
+
+	local submit_tool_output_buf = spawn_output_buffer({
+		cmd = submit_tool_executable,
+		args = {
+			"-server",
+			vim.env["P4PORT"],
+			"-client",
+			vim.env["P4CLIENT"],
+			"-user",
+			vim.env["P4USER"],
+			"-cl",
+			"default",
+		},
+		project_root = project_root,
+	})
+	vim.api.nvim_win_set_buf(0, submit_tool_output_buf)
 
 	async.await(vim.schedule)
 	async.await(vim.schedule)
