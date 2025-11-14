@@ -14,6 +14,7 @@ Install with lazy
 	dependencies = {
 		'nvim-lua/plenary.nvim',
 		'lewis6991/async.nvim',
+		"zaucy/perforce.nvim", -- optional (needed submit tool changelist selector)
 		"j-hui/fidget.nvim", -- optional
 	},
 	cmd = { "Uproject" },
