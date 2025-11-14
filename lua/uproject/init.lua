@@ -1,6 +1,7 @@
 local Path = require("plenary.path")
 local util = require("uproject.util")
 local async = require("async")
+local perforce = require("uproject.perforce")
 
 local spawn_async = async.wrap(3, vim.uv.spawn)
 local fs_copyfile_async = async.wrap(3, vim.uv.fs_copyfile)
@@ -1322,6 +1323,19 @@ function M.uproject_submit(dir, opts)
 
 	local project_root = Path:new(vim.fs.dirname(project_path))
 
+	local changes = perforce.get_submit_changelists()
+	local cl = ui_select_async(changes, {
+		prompt = "changelist",
+		format_item = function(item)
+			return string.format("%s: %s", item.cl, item.desc)
+		end,
+	})
+
+	if not cl then
+		cancel_fidget("no changelist selected")
+		return
+	end
+
 	local submit_tool_output_buf = spawn_output_buffer({
 		cmd = submit_tool_executable,
 		args = {
@@ -1332,7 +1346,7 @@ function M.uproject_submit(dir, opts)
 			"-user",
 			vim.env["P4USER"],
 			"-cl",
-			"default",
+			cl.cl,
 		},
 		project_root = project_root,
 	})
