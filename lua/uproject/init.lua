@@ -70,6 +70,9 @@ local commands = {
 			"use_last_target",
 			"use_precompiled",
 			"uba_force_remote",
+			"disable_unity",
+			"static_analyzer",
+			"no_uba",
 		})
 		return M.uproject_build(vim.fn.getcwd(), args)
 	end,
@@ -1113,6 +1116,9 @@ function M.uproject_build(dir, opts)
 		use_last_target = false,
 		use_precompiled = false,
 		uba_force_remote = false,
+		disable_unity = false,
+		static_analyzer = "",
+		no_uba = false,
 		unlock = "never",
 	}, opts)
 
@@ -1227,6 +1233,19 @@ function M.uproject_build(dir, opts)
 
 	if opts.uba_force_remote then
 		table.insert(args, "-UBAForceRemote")
+	end
+
+	if opts.disable_unity then
+		table.insert(args, "-DisableUnity")
+		table.insert(args, '-UBTArgs="-DisableUnity"')
+	end
+
+	if opts.static_analyzer and opts.static_analyzer ~= "" then
+		table.insert(args, "-StaticAnalyzer=" .. opts.static_analyzer)
+	end
+
+	if opts.no_uba then
+		table.insert(args, "-NoUba")
 	end
 
 	local output_bufnr = -1
