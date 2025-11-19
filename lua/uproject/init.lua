@@ -1340,7 +1340,8 @@ function M.uproject_submit(dir, opts)
 		return
 	end
 
-	local project_root = Path:new(vim.fs.dirname(project_path))
+	local project_dir = vim.fs.dirname(project_path)
+	local project_root = Path:new(project_dir)
 
 	local changes = perforce.get_submit_changelists()
 	local cl = ui_select_async(changes, {
@@ -1366,6 +1367,8 @@ function M.uproject_submit(dir, opts)
 			vim.env["P4USER"],
 			"-cl",
 			cl.cl,
+			"-root-dir",
+			project_dir,
 		},
 		project_root = project_root,
 	})
