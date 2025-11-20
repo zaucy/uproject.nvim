@@ -1334,6 +1334,7 @@ function M.uproject_submit(dir, opts)
 
 	local engine_dir = vim.fs.joinpath(install_dir, "Engine")
 	local submit_tool_executable = vim.fs.joinpath(engine_dir, "Binaries", "Win64", "SubmitTool.exe")
+	local submit_tool_root_dir = vim.fs.abspath(install_dir)
 
 	if vim.fn.filereadable(submit_tool_executable) == 0 then
 		cancel_fidget("cannot find submit tool")
@@ -1368,7 +1369,7 @@ function M.uproject_submit(dir, opts)
 			"-cl",
 			cl.cl,
 			"-root-dir",
-			project_dir,
+			submit_tool_root_dir,
 		},
 		project_root = project_root,
 	})
