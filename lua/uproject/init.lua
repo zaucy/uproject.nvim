@@ -1290,7 +1290,9 @@ function M.uproject_build(dir, opts)
 	async.await(vim.schedule)
 end
 
+--- @async
 function M.uproject_submit(dir, opts)
+	async.await(vim.schedule)
 	local project_path = M.uproject_path(dir)
 	if project_path == nil then
 		vim.notify("cannot find uproject in " .. dir, vim.log.levels.ERROR)
