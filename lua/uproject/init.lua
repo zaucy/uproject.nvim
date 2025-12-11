@@ -73,6 +73,7 @@ local commands = {
 			"disable_unity",
 			"static_analyzer",
 			"no_uba",
+			"no_hot_reload_from_ide",
 		})
 		return M.uproject_build(vim.fn.getcwd(), args)
 	end,
@@ -141,10 +142,11 @@ end
 --- @field Configuration "Debug"|"DebugGame"|"Development"|"Test"|"Shipping"
 --- @field Type string
 
-local _last_selected_target = nil
+--- @type table<string, uproject.SelectedTarget|nil>
+local _last_selected_target_map = {}
 local _last_selected_project_by_directory = {}
 
---- @param cb fun(target: uproject.SelectedTarget)
+--- @param cb fun(target: uproject.SelectedTarget|nil)
 local function select_target(dir, opts, cb)
 	opts = vim.tbl_extend(
 		"force",
@@ -152,8 +154,10 @@ local function select_target(dir, opts, cb)
 		opts
 	)
 
-	if opts.use_last_target and _last_selected_target then
-		local target = vim.deepcopy(_last_selected_target, true)
+	local last_selected_target = _last_selected_target_map[dir]
+
+	if opts.use_last_target and last_selected_target then
+		local target = vim.deepcopy(last_selected_target, true)
 		vim.schedule(function()
 			cb(target)
 		end)
@@ -221,7 +225,7 @@ local function select_target(dir, opts, cb)
 		end
 
 		if #select_options == 1 then
-			_last_selected_target = select_options[1]
+			_last_selected_target_map[dir] = select_options[1]
 			cb(select_options[1])
 			return
 		end
@@ -244,7 +248,12 @@ local function select_target(dir, opts, cb)
 				)
 			end,
 		}, function(selected)
-			_last_selected_target = selected
+			if selected == nil then
+				cb(nil)
+				return
+			end
+
+			_last_selected_target_map[dir] = selected
 			cb(selected)
 		end)
 	end
@@ -1119,6 +1128,7 @@ function M.uproject_build(dir, opts)
 		disable_unity = false,
 		static_analyzer = "",
 		no_uba = false,
+		no_hot_reload_from_ide = false,
 		unlock = "never",
 	}, opts)
 
@@ -1246,6 +1256,10 @@ function M.uproject_build(dir, opts)
 
 	if opts.no_uba then
 		table.insert(args, "-NoUba")
+	end
+
+	if opts.no_hot_reload_from_ide then
+		table.insert(args, "-NoHotReloadFromIDE")
 	end
 
 	local output_bufnr = -1
