@@ -525,8 +525,25 @@ function M.uproject_engine_association(dir)
 	end
 
 	local info = vim.fn.json_decode(vim.fn.readfile(p))
+	local engine_association = info["EngineAssociation"]
 
-	local local_engine_dir = vim.fs.joinpath(root, info["EngineAssociation"])
+	if engine_association == nil or engine_association == "" then
+		-- empty engine association generally means this project is a 'native project'
+		-- https://dev.epicgames.com/documentation/en-us/unreal-engine/managing-game-code-in-unreal-engine#nativeprojects
+
+		local native_root = vim.fs.root(dir, function(name)
+			return name:match("%.uprojectdirs$")
+		end)
+		if native_root ~= nil then
+			vim.notify(native_root)
+			return {
+				kind = "local",
+				path = native_root,
+			}
+		end
+	end
+
+	local local_engine_dir = vim.fs.joinpath(root, engine_association)
 	if vim.fn.isdirectory(local_engine_dir) == 1 then
 		return {
 			kind = "local",
