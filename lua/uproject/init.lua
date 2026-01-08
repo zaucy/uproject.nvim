@@ -535,7 +535,6 @@ function M.uproject_engine_association(dir)
 			return name:match("%.uprojectdirs$")
 		end)
 		if native_root ~= nil then
-			vim.notify(native_root)
 			return {
 				kind = "local",
 				path = native_root,
