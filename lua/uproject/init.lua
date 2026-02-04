@@ -96,6 +96,12 @@ local commands = {
 		local args = parse_fargs(opts.fargs, {})
 		return M.show_last_output_buffer()
 	end,
+	tasks = function(opts)
+		return M.uproject_list_tasks()
+	end,
+	cancel = function(opts)
+		return M.uproject_cancel_task()
+	end,
 	unlock_build_dirs = function(opts)
 		return M.uproject_unlock_build_dirs(vim.fn.getcwd())
 	end,
@@ -145,6 +151,8 @@ end
 --- @type table<string, uproject.SelectedTarget|nil>
 local _last_selected_target_map = {}
 local _last_selected_project_by_directory = {}
+
+local _active_tasks = {}
 
 --- @param cb fun(target: uproject.SelectedTarget|nil)
 local function select_target(dir, opts, cb)
@@ -279,6 +287,17 @@ local function select_target(dir, opts, cb)
 			end
 		end
 
+		if opts.include_engine_targets then
+			for _, platform in ipairs(platforms) do
+				table.insert(select_options, #select_options, {
+					Platform = platform,
+					Configuration = "Development",
+					Name = "UnrealEditor",
+					Type = "Editor",
+				})
+			end
+		end
+
 		check_done()
 	end)
 end
@@ -288,14 +307,34 @@ local select_target_async = async.wrap(3, select_target)
 local _last_output_buffer = nil
 
 ---@param first_line string|nil
+---@param type string|nil
+---@param name string|nil
 ---@return number
-local function make_output_buffer(first_line)
+local function make_output_buffer(first_line, type, name)
 	local bufnr = vim.api.nvim_create_buf(false, true)
 	if first_line ~= nil then
 		vim.api.nvim_buf_set_lines(bufnr, 0, 1, true, { first_line })
 	end
 	vim.api.nvim_set_option_value("modifiable", false, { buf = bufnr })
 	_last_output_buffer = bufnr
+
+	if type then
+		vim.api.nvim_buf_set_var(bufnr, "uproject_type", type)
+	end
+	if name then
+		vim.api.nvim_buf_set_var(bufnr, "uproject_name", name)
+	end
+
+	vim.api.nvim_exec_autocmds("User", {
+		pattern = "UprojectBufferCreated",
+		modeline = false,
+		data = {
+			bufnr = bufnr,
+			type = type,
+			name = name,
+		},
+	})
+
 	return bufnr
 end
 
@@ -375,6 +414,8 @@ end
 --- @field project_root Path
 --- @field progress ProgressHandle|nil
 --- @field env table<string, any>? environment variables passed to spawned process
+--- @field type string?
+--- @field name string?
 
 --- @param opts SpawnOutputBufferOptions
 --- @param cb fun(code: number)|nil
@@ -390,7 +431,7 @@ local function spawn_output_buffer(opts, cb)
 			return vim.fn.shellescape(v)
 		end, args),
 		" "
-	))
+	), opts.type or "task", opts.name)
 	local output_append = vim.schedule_wrap(function(lines)
 		if progress then
 			for _, line in ipairs(lines) do
@@ -412,20 +453,38 @@ local function spawn_output_buffer(opts, cb)
 	local stdout = vim.uv.new_pipe()
 	local stderr = vim.uv.new_pipe()
 
-	vim.uv.spawn(cmd, {
+	local handle, pid
+	handle, pid = vim.uv.spawn(cmd, {
 		stdio = { nil, stdout, stderr },
 		args = args,
 		env = opts.env,
-	}, function(code, _)
+	}, function(code, signal)
+		_active_tasks[output] = nil
 		output_append({
 			"",
-			cmd .. " exited with code " .. code,
+			cmd .. " exited with code " .. code .. (signal ~= 0 and (" (signal " .. signal .. ")") or ""),
 		})
 
 		if cb then
 			vim.schedule_wrap(cb)(code)
 		end
 	end)
+
+	if handle then
+		_active_tasks[output] = {
+			handle = handle,
+			pid = pid,
+			cmd = cmd,
+			args = args,
+			type = opts.type,
+			name = opts.name,
+		}
+	else
+		output_append({
+			"",
+			"Failed to spawn " .. cmd .. ": " .. tostring(pid),
+		})
+	end
 
 	vim.uv.read_start(stdout, function(err, data)
 		if data ~= nil then
@@ -662,6 +721,8 @@ function M.uproject_open(dir, opts)
 			cmd = ue,
 			args = args,
 			project_root = project_root,
+			type = "open",
+			name = project_path.filename,
 		})
 		vim.api.nvim_win_set_buf(0, output)
 		-- vim.uv.spawn(ue, {
@@ -768,6 +829,8 @@ function M.uproject_play(dir, opts)
 			cmd = "dbg",
 			args = args,
 			project_root = project_root,
+			type = "play",
+			name = umap_file ~= "" and umap_file or "StartupMap",
 		})
 		vim.api.nvim_win_set_buf(0, output)
 	else
@@ -775,6 +838,8 @@ function M.uproject_play(dir, opts)
 			cmd = ue,
 			args = args,
 			project_root = project_root,
+			type = "play",
+			name = umap_file ~= "" and umap_file or "StartupMap",
 		})
 		vim.api.nvim_win_set_buf(0, output)
 	end
@@ -946,7 +1011,7 @@ function M.uproject_reload(dir, opts)
 	local output = nil
 
 	if opts.show_output then
-		output = make_output_buffer()
+		output = make_output_buffer(nil, "reload")
 		vim.api.nvim_win_set_buf(0, output)
 	end
 
@@ -1118,6 +1183,7 @@ end
 --- @field skip_pre_build_targets boolean|nil
 --- @field use_last_target boolean|nil
 --- @field unlock "never"|"always"|"auto"|nil|boolean
+--- @field include_engine_targets nil|boolean
 --- @field env table<string, any>|nil environment variables used when spawning UnrealBuildTool
 
 --- @async
@@ -1146,6 +1212,7 @@ function M.uproject_build(dir, opts)
 		no_uba = false,
 		no_hot_reload_from_ide = false,
 		unlock = "never",
+		include_engine_targets = false,
 	}, opts)
 
 	assert(
@@ -1311,6 +1378,8 @@ function M.uproject_build(dir, opts)
 		project_root = project_root,
 		progress = fidget_progress,
 		env = opts.env,
+		type = "build",
+		name = target.Name,
 	}, on_spawn_done)
 	if not opts.hide_output then
 		vim.api.nvim_win_set_buf(0, output_bufnr)
@@ -1404,6 +1473,8 @@ function M.uproject_submit(dir, opts)
 			submit_tool_root_dir,
 		},
 		project_root = project_root,
+		type = "submit",
+		name = cl.cl,
 	})
 	vim.api.nvim_win_set_buf(0, submit_tool_output_buf)
 
@@ -1474,6 +1545,7 @@ function M.uproject_clean(dir, opts)
 		type_pattern = opts.type_pattern,
 		configuration_pattern = opts.configuration_pattern,
 		use_last_target = opts.use_last_target,
+		include_engine_targets = opts.include_engine_targets,
 	}
 	local target = select_target_async(dir, select_target_options)
 	if target == nil then
@@ -1516,6 +1588,8 @@ function M.uproject_clean(dir, opts)
 		project_root = project_root,
 		progress = fidget_progress,
 		env = opts.env,
+		type = "clean",
+		name = target.Name,
 	}, on_spawn_done)
 	if not opts.hide_output then
 		vim.api.nvim_win_set_buf(0, output_bufnr)
@@ -1554,6 +1628,7 @@ function M.uproject_build_plugins(dir, opts)
 		type_pattern = opts.type_pattern,
 		configuration_pattern = opts.configuration_pattern,
 		use_last_target = opts.use_last_target,
+		include_engine_targets = opts.include_engine_targets,
 	}
 	local target = select_target_async(dir, select_target_options)
 	M.uproject_plugin_paths(dir, function(plugins)
@@ -1582,6 +1657,8 @@ function M.uproject_build_plugins(dir, opts)
 				cmd = build_bat,
 				args = args,
 				project_root = project_root,
+				type = "build_plugins",
+				name = plugin_info["FriendlyName"] or vim.fs.basename(plugin),
 			}, on_spawn_done)
 			vim.api.nvim_win_set_buf(0, output_bufnr)
 		end
@@ -1716,7 +1793,7 @@ function M.uproject_unlock_build_dirs(dir)
 		return
 	end
 
-	local output = make_output_buffer("unlocking project and engine build directories...")
+	local output = make_output_buffer("unlocking project and engine build directories...", "unlock")
 	vim.api.nvim_win_set_buf(0, output)
 
 	local has_fidget, fidget = pcall(require, "fidget")
@@ -1825,6 +1902,69 @@ function M.uproject_unlock_build_dirs(dir)
 	local unlock_duration = (unlock_stop - unlock_start) / 1e6
 
 	append_output_buffer(output, { "", ("Done in %.2fms"):format(unlock_duration) })
+end
+
+function M.uproject_list_tasks()
+	local tasks = {}
+	for bufnr, task in pairs(_active_tasks) do
+		if vim.api.nvim_buf_is_valid(bufnr) then
+			table.insert(tasks, { bufnr = bufnr, task = task })
+		end
+	end
+
+	if #tasks == 0 then
+		vim.notify("No active tasks", vim.log.levels.INFO)
+		return
+	end
+
+	vim.ui.select(tasks, {
+		prompt = "Active Tasks",
+		format_item = function(item)
+			return string.format("[%d] %s", item.bufnr, item.task.cmd)
+		end,
+	}, function(selected)
+		if selected then
+			vim.api.nvim_win_set_buf(0, selected.bufnr)
+		end
+	end)
+end
+
+function M.uproject_cancel_task(bufnr)
+	bufnr = bufnr or vim.api.nvim_get_current_buf()
+	local task = _active_tasks[bufnr]
+
+	if not task then
+		local tasks = {}
+		for b, t in pairs(_active_tasks) do
+			if vim.api.nvim_buf_is_valid(b) then
+				table.insert(tasks, { bufnr = b, task = t })
+			end
+		end
+
+		if #tasks == 0 then
+			vim.notify("No active tasks to cancel", vim.log.levels.INFO)
+			return
+		end
+
+		vim.ui.select(tasks, {
+			prompt = "Select task to cancel",
+			format_item = function(item)
+				return string.format("[%d] %s", item.bufnr, item.task.cmd)
+			end,
+		}, function(selected)
+			if selected then
+				M.uproject_cancel_task(selected.bufnr)
+			end
+		end)
+		return
+	end
+
+	if task.handle and not task.handle:is_closing() then
+		task.handle:kill("sigterm")
+		vim.notify("Cancelled task in buffer " .. bufnr)
+	else
+		vim.notify("Task in buffer " .. bufnr .. " is already closing or closed", vim.log.levels.WARN)
+	end
 end
 
 function M.show_last_output_buffer()
