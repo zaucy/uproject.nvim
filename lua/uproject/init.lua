@@ -51,7 +51,7 @@ local commands = {
 		return M.uproject_open(vim.fn.getcwd(), args)
 	end,
 	play = function(opts)
-		local args = parse_fargs(opts.fargs, { "log_cmds", "debug", "use_last_target" })
+		local args = parse_fargs(opts.fargs, { "log_cmds", "debug", "use_last_target", "exec_cmds" })
 		return M.uproject_play(vim.fn.getcwd(), args)
 	end,
 	build = function(opts)
@@ -813,6 +813,10 @@ function M.uproject_play(dir, opts)
 
 	if opts.log_cmds then
 		table.insert(args, "-LogCmds=" .. opts.log_cmds)
+	end
+
+	if opts.exec_cmds then
+		table.insert(args, "-ExecCmds=" .. opts.exec_cmds)
 	end
 
 	local install_dir = M.unreal_engine_install_dir(engine_association)
