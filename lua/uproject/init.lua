@@ -690,13 +690,63 @@ function M.uproject_open(dir, opts)
 		return
 	end
 
+	local has_fidget, fidget = pcall(require, "fidget")
+	local fidget_progress = nil
+
+	if has_fidget then
+		fidget_progress = fidget.progress.handle.create({
+			key = "UProjectOpen",
+			title = "󰦱 Open ",
+			message = "",
+			lsp_client = { name = "uproject.nvim" },
+			percentage = 0,
+			cancellable = true,
+		})
+	end
+
+	local function cancel_fidget(reason)
+		if has_fidget then
+			---@diagnostic disable-next-line: need-check-nil
+			fidget_progress.message = reason
+			---@diagnostic disable-next-line: need-check-nil
+			fidget_progress:cancel()
+		end
+	end
+
 	local install_dir = M.unreal_engine_install_dir(engine_association)
 	if install_dir == nil then
 		return
 	end
 
 	local engine_dir = vim.fs.joinpath(install_dir, "Engine")
-	local ue = vim.fs.joinpath(engine_dir, "Binaries", "Win64", "UnrealEditor.exe")
+
+	local select_target_options = {
+		type_pattern = "Editor",
+		configuration_pattern = opts.configuration_pattern,
+		use_last_target = opts.use_last_target,
+	}
+
+	async.await(vim.schedule)
+
+	--- @type uproject.SelectedTarget|nil
+	local target = select_target_async(dir, select_target_options)
+	if target == nil then
+		cancel_fidget("no target selected")
+		return
+	end
+
+	cancel_fidget()
+
+	local ue_exe_name = "UnrealEditor"
+	if target.Configuration ~= "Development" then
+		ue_exe_name = string.format("UnrealEditor-%s-%s", target.Platform, target.Configuration)
+	end
+
+	if vim.startswith(target.Platform:lower(), "win") then
+		ue_exe_name = ue_exe_name .. ".exe"
+	end
+
+	local ue = vim.fs.joinpath(engine_dir, "Binaries", target.Platform, ue_exe_name)
 
 	local args = {
 		project_path:absolute(),
