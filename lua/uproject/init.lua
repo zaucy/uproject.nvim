@@ -295,6 +295,12 @@ local function select_target(dir, opts, cb)
 					Name = "UnrealEditor",
 					Type = "Editor",
 				})
+				table.insert(select_options, #select_options, {
+					Platform = platform,
+					Configuration = "Debug",
+					Name = "UnrealEditor",
+					Type = "Editor",
+				})
 			end
 		end
 
@@ -1326,6 +1332,7 @@ function M.uproject_build(dir, opts)
 		type_pattern = opts.type_pattern,
 		configuration_pattern = opts.configuration_pattern,
 		use_last_target = opts.use_last_target,
+		include_engine_targets = opts.include_engine_targets,
 	}
 
 	async.await(vim.schedule)
