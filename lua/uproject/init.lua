@@ -74,6 +74,7 @@ local commands = {
 			"static_analyzer",
 			"no_uba",
 			"no_hot_reload_from_ide",
+			"exclude_engine_targets",
 		})
 		return M.uproject_build(vim.fn.getcwd(), args)
 	end,
@@ -158,7 +159,7 @@ local _active_tasks = {}
 local function select_target(dir, opts, cb)
 	opts = vim.tbl_extend(
 		"force",
-		{ type_pattern = ".*", configuration_pattern = ".*", include_engine_targets = false, use_last_target = false },
+		{ type_pattern = ".*", configuration_pattern = ".*", exclude_engine_targets = false, use_last_target = false },
 		opts
 	)
 
@@ -180,7 +181,7 @@ local function select_target(dir, opts, cb)
 		return index ~= nil
 	end, target_info.Targets)
 
-	if not opts.include_engine_targets then
+	if opts.exclude_engine_targets then
 		local target_info_dir = vim.fs.dirname(target_info_path)
 		targets = vim.tbl_filter(function(target)
 			local target_path = target.Path
@@ -287,7 +288,7 @@ local function select_target(dir, opts, cb)
 			end
 		end
 
-		if opts.include_engine_targets then
+		if not opts.exclude_engine_targets then
 			for _, platform in ipairs(platforms) do
 				table.insert(select_options, #select_options, {
 					Platform = platform,
@@ -1243,7 +1244,7 @@ end
 --- @field skip_pre_build_targets boolean|nil
 --- @field use_last_target boolean|nil
 --- @field unlock "never"|"always"|"auto"|nil|boolean
---- @field include_engine_targets nil|boolean
+--- @field exclude_engine_targets nil|boolean
 --- @field env table<string, any>|nil environment variables used when spawning UnrealBuildTool
 
 --- @async
@@ -1272,7 +1273,7 @@ function M.uproject_build(dir, opts)
 		no_uba = false,
 		no_hot_reload_from_ide = false,
 		unlock = "never",
-		include_engine_targets = false,
+		exclude_engine_targets = false,
 	}, opts)
 
 	assert(
@@ -1332,7 +1333,7 @@ function M.uproject_build(dir, opts)
 		type_pattern = opts.type_pattern,
 		configuration_pattern = opts.configuration_pattern,
 		use_last_target = opts.use_last_target,
-		include_engine_targets = opts.include_engine_targets,
+		exclude_engine_targets = opts.exclude_engine_targets,
 	}
 
 	async.await(vim.schedule)
@@ -1606,7 +1607,7 @@ function M.uproject_clean(dir, opts)
 		type_pattern = opts.type_pattern,
 		configuration_pattern = opts.configuration_pattern,
 		use_last_target = opts.use_last_target,
-		include_engine_targets = opts.include_engine_targets,
+		exclude_engine_targets = opts.exclude_engine_targets,
 	}
 	local target = select_target_async(dir, select_target_options)
 	if target == nil then
@@ -1689,7 +1690,7 @@ function M.uproject_build_plugins(dir, opts)
 		type_pattern = opts.type_pattern,
 		configuration_pattern = opts.configuration_pattern,
 		use_last_target = opts.use_last_target,
-		include_engine_targets = opts.include_engine_targets,
+		exclude_engine_targets = opts.exclude_engine_targets,
 	}
 	local target = select_target_async(dir, select_target_options)
 	M.uproject_plugin_paths(dir, function(plugins)
