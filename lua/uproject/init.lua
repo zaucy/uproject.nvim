@@ -829,25 +829,18 @@ function M.uproject_play(dir, opts)
 	local project_path = Path:new(project_path)
 	local content_dir = vim.fs.joinpath(project_root.filename, "Content")
 
-	local umap_files = vim.fs.find(function(name, path)
-		return vim.endswith(name, ".umap")
-	end, { type = "file", path = content_dir, limit = math.huge })
-	table.insert(umap_files, 1, "")
-
-	local umap_file, umap_file_index = ui_select_async(umap_files, {
-		prompt = "umap (optional)",
-		format_item = function(file)
-			if file == "" then
-				return "(startup map)"
-			end
-
-			return umap_to_game_path(file) or "(invalid path)"
-		end,
-	})
+	local select_target_options = {
+		configuration_pattern = opts.configuration_pattern,
+		use_last_target = opts.use_last_target,
+		exclude_engine_targets = true,
+	}
 
 	async.await(vim.schedule)
 
-	if umap_file_index == nil then
+	--- @type uproject.SelectedTarget|nil
+	local target = select_target_async(dir, select_target_options)
+	if target == nil then
+		vim.notify("no target selected")
 		return
 	end
 
@@ -856,53 +849,125 @@ function M.uproject_play(dir, opts)
 		return
 	end
 
-	local args = {
-		project_path:absolute(),
-	}
-
-	if umap_file_index ~= nil then
-		table.insert(args, umap_file)
-	end
-
-	table.insert(args, "-Stdout")
-	table.insert(args, "-FullStdOutLogOutput")
-	table.insert(args, "-Game")
-
-	if opts.log_cmds then
-		table.insert(args, "-LogCmds=" .. opts.log_cmds)
-	end
-
-	if opts.exec_cmds then
-		table.insert(args, "-ExecCmds=" .. opts.exec_cmds)
-	end
-
 	local install_dir = M.unreal_engine_install_dir(engine_association)
 	if install_dir == nil then
 		return
 	end
 
 	local engine_dir = vim.fs.joinpath(install_dir, "Engine")
-	local ue = vim.fs.joinpath(engine_dir, "Binaries", "Win64", "UnrealEditor-Cmd.exe")
-	if opts.debug then
-		table.insert(args, 1, ue)
-		table.insert(args, 1, "launch")
-		local output = spawn_output_buffer({
-			cmd = "dbg",
-			args = args,
-			project_root = project_root,
-			type = "play",
-			name = umap_file ~= "" and umap_file or "StartupMap",
+
+	if target.Type == "Editor" then
+		local umap_files = vim.fs.find(function(name, path)
+			return vim.endswith(name, ".umap")
+		end, { type = "file", path = content_dir, limit = math.huge })
+		table.insert(umap_files, 1, "")
+
+		local umap_file, umap_file_index = ui_select_async(umap_files, {
+			prompt = "umap (optional)",
+			format_item = function(file)
+				if file == "" then
+					return "(startup map)"
+				end
+
+				return umap_to_game_path(file) or "(invalid path)"
+			end,
 		})
-		vim.api.nvim_win_set_buf(0, output)
+
+		async.await(vim.schedule)
+
+		if umap_file_index == nil then
+			return
+		end
+
+		local args = {
+			project_path:absolute(),
+		}
+
+		if umap_file_index ~= nil then
+			table.insert(args, umap_file)
+		end
+
+		table.insert(args, "-Stdout")
+		table.insert(args, "-FullStdOutLogOutput")
+		table.insert(args, "-Game")
+
+		if opts.log_cmds then
+			table.insert(args, "-LogCmds=" .. opts.log_cmds)
+		end
+
+		if opts.exec_cmds then
+			table.insert(args, "-ExecCmds=" .. opts.exec_cmds)
+		end
+
+		local ue_exe_name = "UnrealEditor-Cmd"
+		if target.Configuration ~= "Development" then
+			ue_exe_name = string.format("UnrealEditor-%s-%s-Cmd", target.Platform, target.Configuration)
+		end
+
+		if vim.startswith(target.Platform:lower(), "win") then
+			ue_exe_name = ue_exe_name .. ".exe"
+		end
+
+		local ue = vim.fs.joinpath(engine_dir, "Binaries", target.Platform, ue_exe_name)
+
+		if opts.debug then
+			table.insert(args, 1, ue)
+			table.insert(args, 1, "launch")
+			local output = spawn_output_buffer({
+				cmd = "dbg",
+				args = args,
+				project_root = project_root,
+				type = "play",
+				name = umap_file ~= "" and umap_file or "StartupMap",
+			})
+			vim.api.nvim_win_set_buf(0, output)
+		else
+			local output = spawn_output_buffer({
+				cmd = ue,
+				args = args,
+				project_root = project_root,
+				type = "play",
+				name = umap_file ~= "" and umap_file or "StartupMap",
+			})
+			vim.api.nvim_win_set_buf(0, output)
+		end
 	else
-		local output = spawn_output_buffer({
-			cmd = ue,
-			args = args,
-			project_root = project_root,
-			type = "play",
-			name = umap_file ~= "" and umap_file or "StartupMap",
-		})
-		vim.api.nvim_win_set_buf(0, output)
+		local args = {}
+
+		local game_exe_name = target.Name
+		if target.Configuration ~= "Development" then
+			game_exe_name = string.format("%s-%s-%s", target.Name, target.Platform, target.Configuration)
+		end
+
+		if vim.startswith(target.Platform:lower(), "win") then
+			game_exe_name = game_exe_name .. ".exe"
+		end
+
+		local project_dir = vim.fs.dirname(project_path:absolute())
+
+		local project_binaries_dir = vim.fs.joinpath(project_dir, "Binaries")
+
+		local game_exe = vim.fs.joinpath(project_binaries_dir, target.Platform, game_exe_name)
+
+		if opts.debug then
+			table.insert(args, 1, game_exe)
+			table.insert(args, 1, "launch")
+			local output = spawn_output_buffer({
+				cmd = "dbg",
+				args = args,
+				project_root = project_root,
+				type = "play",
+			})
+			vim.api.nvim_win_set_buf(0, output)
+		else
+			local output = spawn_output_buffer({
+				cmd = game_exe,
+				args = args,
+				project_root = project_root,
+				type = "play",
+			})
+			vim.api.nvim_win_set_buf(0, output)
+		end
 	end
 end
 
