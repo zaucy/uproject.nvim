@@ -89,6 +89,10 @@ local commands = {
 		})
 		return M.uproject_clean(vim.fn.getcwd(), args)
 	end,
+	cook = function(opts)
+		local args = parse_fargs(opts.fargs, { "iterative", "unattended", "compressed" })
+		return M.uproject_cook(vim.fn.getcwd(), args)
+	end,
 	build_plugins = function(opts)
 		local args = parse_fargs(opts.fargs, { "wait", "ignore_junk", "type_pattern", "close_output_on_success" })
 		return M.uproject_build_plugins(vim.fn.getcwd(), args)
@@ -969,6 +973,116 @@ function M.uproject_play(dir, opts)
 			vim.api.nvim_win_set_buf(0, output)
 		end
 	end
+end
+
+--- @async
+function M.uproject_cook(dir, opts)
+	async.await(vim.schedule)
+	opts = vim.tbl_extend("force", {
+		use_last_target = false,
+	}, opts)
+
+	local project_path_str, root = M.uproject_path(dir)
+	if project_path_str == nil then
+		vim.notify("cannot find uproject in " .. (dir or "current directory"), vim.log.levels.ERROR)
+		return
+	end
+	dir = root
+
+	local project_root = Path:new(root)
+	local project_path = Path:new(project_path_str)
+
+	local engine_association = M.uproject_engine_association(dir)
+	if engine_association.kind == "none" then
+		return
+	end
+
+	local has_fidget, fidget = pcall(require, "fidget")
+	local fidget_progress = nil
+
+	if has_fidget then
+		fidget_progress = fidget.progress.handle.create({
+			key = "UProjectCook",
+			title = "󰦱 Cook ",
+			message = "",
+			lsp_client = { name = "uproject.nvim" },
+			percentage = 0,
+			cancellable = true,
+		})
+	end
+
+	local function cancel_fidget(reason)
+		if has_fidget then
+			---@diagnostic disable-next-line: need-check-nil
+			fidget_progress.message = reason
+			---@diagnostic disable-next-line: need-check-nil
+			fidget_progress:cancel()
+		end
+	end
+
+	local install_dir = M.unreal_engine_install_dir(engine_association)
+	if not install_dir then
+		cancel_fidget("cannot find engine install directory")
+		return
+	end
+
+	local engine_dir = vim.fs.joinpath(install_dir, "Engine")
+
+	local ue_exe_name = "UnrealEditor-Cmd.exe"
+	local ue = vim.fs.joinpath(engine_dir, "Binaries", "Win64", ue_exe_name)
+
+	async.await(vim.schedule)
+
+	local args = {
+		project_path:absolute(),
+		"-Run=Cook",
+		-- TODO: get cookable targets as selectable by user
+		"-TargetPlatform=Windows",
+	}
+
+	if opts.iterative then
+		table.insert(args, "-IterativeCooking")
+	end
+
+	if opts.unattended then
+		table.insert(args, "-Unattended")
+	end
+
+	if opts.compressed then
+		table.insert(args, "-Compressed")
+	end
+
+	local output_bufnr = -1
+	local on_spawn_done = function(exit_code)
+		if exit_code ~= 0 then
+			vim.notify("󰦱 Cook failed with exit code " .. tostring(exit_code), vim.log.levels.ERROR)
+		end
+
+		if fidget_progress ~= nil then
+			if exit_code ~= 0 then
+				fidget_progress.percentage = nil
+				fidget_progress.message = "cook failed with exit code " .. tostring(exit_code)
+				fidget_progress:cancel()
+			else
+				fidget_progress:finish()
+			end
+		end
+	end
+
+	output_bufnr = spawn_output_buffer({
+		cmd = ue,
+		args = args,
+		project_root = project_root,
+		progress = fidget_progress,
+		env = opts.env,
+		type = "cook",
+	}, on_spawn_done)
+	if not opts.hide_output then
+		vim.api.nvim_win_set_buf(0, output_bufnr)
+	end
+
+	async.await(vim.schedule)
+	async.await(vim.schedule)
 end
 
 function M.uproject_plugin_paths(dir, cb)
