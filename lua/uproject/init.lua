@@ -608,6 +608,7 @@ function M.uproject_engine_association(dir)
 			return {
 				kind = "local",
 				path = native_root,
+				is_native = true,
 			}
 		end
 	end
@@ -1364,21 +1365,26 @@ function M.uproject_reload(dir, opts)
 	if ubt_exit_code ~= 0 then
 		notify_error("Failed to reload uproject (exit code " .. ubt_exit_code .. ")")
 	else
-		notify_info("Copying compile_commands.json to project root")
-		local err = fs_copyfile_async(
-			vim.fs.joinpath(install_dir, "compile_commands.json"),
-			vim.fs.joinpath(tostring(vim.fs.dirname(project_path:absolute())), "compile_commands.json")
-		)
-		if err then
-			notify_error(err)
-		else
-			if fidget_progress ~= nil then
-				fidget_progress:finish()
+		if engine_association.kind == "local" and not engine_association.is_native then
+			notify_info("Copying compile_commands.json to project root")
+			local err = fs_copyfile_async(
+				vim.fs.joinpath(install_dir, "compile_commands.json"),
+				vim.fs.joinpath(tostring(vim.fs.dirname(project_path:absolute())), "compile_commands.json")
+			)
+			if err then
+				notify_error(err)
+			else
+				if fidget_progress ~= nil then
+					fidget_progress:finish()
+				end
 			end
+		else
+			notify_info("skipping copy for native projects")
 		end
 	end
 
 	async.await(vim.schedule)
+	notify_info("done", true)
 end
 
 local function any_project_binary_is_ro(project_dir)
