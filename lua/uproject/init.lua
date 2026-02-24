@@ -5,6 +5,7 @@ local perforce = require("uproject.perforce")
 
 local spawn_async = async.wrap(3, vim.uv.spawn)
 local fs_copyfile_async = async.wrap(3, vim.uv.fs_copyfile)
+local fs_rmdir_async = async.wrap(2, vim.uv.fs_rmdir)
 local ui_select_async = async.wrap(3, vim.ui.select)
 
 local M = {}
@@ -1365,12 +1366,12 @@ function M.uproject_reload(dir, opts)
 	if ubt_exit_code ~= 0 then
 		notify_error("Failed to reload uproject (exit code " .. ubt_exit_code .. ")")
 	else
+		local engine_compile_commands = vim.fs.joinpath(install_dir, "compile_commands.json")
+		local project_compile_commands =
+			vim.fs.joinpath(tostring(vim.fs.dirname(project_path:absolute())), "compile_commands.json")
 		if engine_association.kind == "local" and not engine_association.is_native then
 			notify_info("Copying compile_commands.json to project root")
-			local err = fs_copyfile_async(
-				vim.fs.joinpath(install_dir, "compile_commands.json"),
-				vim.fs.joinpath(tostring(vim.fs.dirname(project_path:absolute())), "compile_commands.json")
-			)
+			local err = fs_copyfile_async(engine_compile_commands, project_compile_commands)
 			if err then
 				notify_error(err)
 			else
@@ -1380,6 +1381,20 @@ function M.uproject_reload(dir, opts)
 			end
 		else
 			notify_info("skipping copy for native projects")
+			if vim.uv.fs_stat(project_compile_commands) ~= nil then
+				notify_info("project compile commands found")
+				notify_info("deleting project compile commands (engine used only for native projects)")
+				async.await(vim.schedule)
+				vim.fn.delete(project_compile_commands)
+
+				local project_clangd_cache =
+					vim.fs.joinpath(tostring(vim.fs.dirname(project_path:absolute())), ".cache/clangd")
+				if vim.uv.fs_stat(project_clangd_cache) ~= nil then
+					notify_info("deleting project clangd cache (engine used only for native projects)")
+					fs_rmdir_async(project_clangd_cache)
+					async.await(vim.schedule)
+				end
+			end
 		end
 	end
 
