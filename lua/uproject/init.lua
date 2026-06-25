@@ -389,7 +389,7 @@ local function append_output_buffer(bufnr, lines)
 	local buf_line_count = vim.api.nvim_buf_line_count(bufnr)
 
 	for i, line in ipairs(lines) do
-		local line_no = buf_line_count - i
+		local line_no = buf_line_count - #lines + (i - 1)
 		local col_start = 0
 		local col_end = #line
 
@@ -420,11 +420,42 @@ local function transform_output_lines(lines, project_root)
 	end, lines)
 end
 
+local progress_parsers = {
+	build = function(line, progress)
+		if vim.startswith(line, "[") then
+			local prog, total = string.match(line, "%[(%d+)/(%d+)%]")
+			if prog and total then
+				local prog_num = tonumber(prog)
+				local total_num = tonumber(total)
+
+				if total_num > 0 then
+					progress.percentage = (prog_num / total_num) * 100
+				end
+				progress.message = string.sub(line, (string.find(line, "]", 1, true) or 0) + 1)
+			end
+		end
+	end,
+	cook = function(line, progress)
+		local cook_prog, cook_total =
+			string.match(line, "LogCook: Display: Cooked packages (%d+) Packages Remain %d+ Total (%d+)")
+		if cook_prog and cook_total then
+			local prog_num = tonumber(cook_prog)
+			local total_num = tonumber(cook_total)
+
+			if total_num > 0 then
+				progress.percentage = (prog_num / total_num) * 100
+			end
+			progress.message = " Cooked " .. cook_prog .. "/" .. cook_total
+		end
+	end,
+}
+
 --- @class SpawnOutputBufferOptions
 --- @field cmd string
 --- @field args string[]
 --- @field project_root Path
 --- @field progress ProgressHandle|nil
+--- @field progress_parser (fun(line: string, progress: ProgressHandle))?
 --- @field env table<string, any>? environment variables passed to spawned process
 --- @field type string?
 --- @field name string?
@@ -444,19 +475,11 @@ local function spawn_output_buffer(opts, cb)
 		end, args),
 		" "
 	), opts.type or "task", opts.name)
+	local progress_parser = opts.progress_parser or progress_parsers.build
 	local output_append = vim.schedule_wrap(function(lines)
 		if progress then
 			for _, line in ipairs(lines) do
-				if vim.startswith(line, "[") then
-					local prog, total, whole_prog = string.match(line, "%[(%d+)/(%d+)%]")
-					if prog and total then
-						local prog_num = tonumber(prog)
-						local total_num = tonumber(total)
-
-						progress.percentage = (prog_num / total_num) * 100
-						progress.message = string.sub(line, (string.find(line, "]", 1, true) or 0) + 1)
-					end
-				end
+				progress_parser(line, progress)
 			end
 		end
 		append_output_buffer(output, transform_output_lines(lines, project_root))
@@ -498,20 +521,58 @@ local function spawn_output_buffer(opts, cb)
 		})
 	end
 
+	local stdout_partial = ""
 	vim.uv.read_start(stdout, function(err, data)
 		if data ~= nil then
-			local lines = vim.split(data, "\r\n", { trimempty = true })
+			stdout_partial = stdout_partial .. data
+			local lines = {}
+			while true do
+				local s, e = stdout_partial:find("\n", 1, true)
+				if not s then
+					break
+				end
+				local line = stdout_partial:sub(1, s - 1)
+				if line:sub(-1) == "\r" then
+					line = line:sub(1, -2)
+				end
+				table.insert(lines, line)
+				stdout_partial = stdout_partial:sub(e + 1)
+			end
 			if #lines > 0 then
-				output_append(vim.split(data, "\r\n", { trimempty = true }))
+				output_append(lines)
+			end
+		else
+			if stdout_partial ~= "" then
+				output_append({ stdout_partial })
+				stdout_partial = ""
 			end
 		end
 	end)
 
+	local stderr_partial = ""
 	vim.uv.read_start(stderr, function(err, data)
 		if data ~= nil then
-			local lines = vim.split(data, "\r\n", { trimempty = true })
+			stderr_partial = stderr_partial .. data
+			local lines = {}
+			while true do
+				local s, e = stderr_partial:find("\n", 1, true)
+				if not s then
+					break
+				end
+				local line = stderr_partial:sub(1, s - 1)
+				if line:sub(-1) == "\r" then
+					line = line:sub(1, -2)
+				end
+				table.insert(lines, line)
+				stderr_partial = stderr_partial:sub(e + 1)
+			end
 			if #lines > 0 then
-				output_append(vim.split(data, "\r\n", { trimempty = true }))
+				output_append(lines)
+			end
+		else
+			if stderr_partial ~= "" then
+				output_append({ stderr_partial })
+				stderr_partial = ""
 			end
 		end
 	end)
@@ -1076,6 +1137,7 @@ function M.uproject_cook(dir, opts)
 		args = args,
 		project_root = project_root,
 		progress = fidget_progress,
+		progress_parser = progress_parsers.cook,
 		env = opts.env,
 		type = "cook",
 	}, on_spawn_done)
