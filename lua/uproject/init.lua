@@ -370,6 +370,31 @@ local function is_warn_line(line)
 	return false or line:find("warning", 0, true) ~= nil or line:find("Warning:", 0, true) ~= nil
 end
 
+function M.output_foldexpr()
+	local lnum = vim.v.lnum
+	local line = vim.fn.getline(lnum)
+	if is_error_line(line) or is_warn_line(line) then
+		return "0"
+	else
+		return "1"
+	end
+end
+
+function M.toggle_error_fold()
+	local win = vim.api.nvim_get_current_win()
+	local current_fdm = vim.api.nvim_get_option_value("foldmethod", { win = win })
+	if current_fdm ~= "expr" then
+		vim.api.nvim_set_option_value("foldmethod", "expr", { win = win })
+		vim.api.nvim_set_option_value("foldexpr", "v:lua.require('uproject').output_foldexpr()", { win = win })
+		vim.cmd("normal! zM")
+		vim.notify("Folded non-error lines. Call toggle_error_fold() again to expand.", vim.log.levels.INFO)
+	else
+		vim.api.nvim_set_option_value("foldmethod", "manual", { win = win })
+		vim.cmd("normal! zE")
+		vim.notify("Expanded all lines.", vim.log.levels.INFO)
+	end
+end
+
 ---@param bufnr number
 ---@param lines string[]
 local function append_output_buffer(bufnr, lines)

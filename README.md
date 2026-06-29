@@ -45,3 +45,18 @@ vim.api.nvim_create_autocmd("DirChanged", {
 	end,
 })
 ```
+
+## Toggle Error Folds in Output Buffer
+
+You can easily set up a custom keymap to collapse all normal lines in the `uproject` output buffer, leaving only the errors and warnings visible. Since `uproject.nvim` does not map keys for you, you can do this by hooking into the `UprojectBufferCreated` event:
+
+```lua
+vim.api.nvim_create_autocmd("User", {
+	pattern = "UprojectBufferCreated",
+	callback = function(ev)
+		vim.keymap.set("n", "E", function()
+			require("uproject").toggle_error_fold()
+		end, { buffer = ev.data.bufnr, desc = "Toggle Error/Warning Fold" })
+	end,
+})
+```
