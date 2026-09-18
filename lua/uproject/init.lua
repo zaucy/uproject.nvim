@@ -141,7 +141,7 @@ local function get_available_target_configurations(target, platform, cb)
 	-- TODO: actually check
 	vim.schedule(function()
 		if target.Type == "Editor" then
-			cb({ "Debug", "Development" })
+			cb({ "Debug", "Development", "DebugGame" })
 		else
 			cb({ "Debug", "DebugGame", "Development", "Test", "Shipping" })
 		end
