@@ -760,6 +760,45 @@ function M.unreal_engine_install_dir(engine_association)
 	return value
 end
 
+--- @async
+--- @param dir string|nil
+--- @return string|nil
+function M.unreal_virtualization_tool(dir)
+	dir = dir or vim.fn.getcwd()
+	local engine_assoc = M.uproject_engine_association(dir)
+	local engine_dir = nil
+
+	if engine_assoc.kind == "local" then
+		engine_dir = engine_assoc.path
+	elseif engine_assoc.kind == "system" then
+		engine_dir = M.unreal_engine_install_dir(engine_assoc)
+	end
+
+	local candidates = {}
+	if engine_dir then
+		table.insert(
+			candidates,
+			vim.fs.joinpath(engine_dir, "Engine", "Binaries", "Win64", "UnrealVirtualizationTool.exe")
+		)
+		table.insert(candidates, vim.fs.joinpath(engine_dir, "Binaries", "Win64", "UnrealVirtualizationTool.exe"))
+	end
+
+	local root = vim.fs.root(dir, function(name)
+		return name == "Engine" or name == "Build"
+	end)
+	if root then
+		table.insert(candidates, vim.fs.joinpath(root, "Engine", "Binaries", "Win64", "UnrealVirtualizationTool.exe"))
+	end
+
+	for _, candidate in ipairs(candidates) do
+		if vim.fn.filereadable(candidate) == 1 then
+			return vim.fs.normalize(candidate)
+		end
+	end
+
+	return nil
+end
+
 --- @class UprojectOpenOptions
 --- @field debug boolean|nil
 --- @field log_cmds string|nil
@@ -2327,7 +2366,19 @@ function M.setup(opts)
 		extension = {
 			uproject = "json",
 			uplugin = "json",
+			uasset = "uasset",
+			umap = "uasset",
+			uexp = "uasset",
+			ubulk = "uasset",
+			uptnl = "uasset",
 		},
+	})
+
+	vim.api.nvim_create_autocmd("BufReadCmd", {
+		pattern = { "*.uasset", "*.umap", "*.uexp", "*.ubulk", "*.uptnl" },
+		callback = function(ev)
+			require("uproject.asset").on_buf_read_cmd(ev.buf, ev.file)
+		end,
 	})
 
 	vim.api.nvim_create_user_command("Uproject", uproject_command, {
@@ -2338,5 +2389,9 @@ function M.setup(opts)
 		end,
 	})
 end
+
+M.remote = require("uproject.remote")
+M.asset = require("uproject.asset")
+M.spawn_output_buffer = spawn_output_buffer
 
 return M

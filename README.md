@@ -60,3 +60,29 @@ vim.api.nvim_create_autocmd("User", {
 	end,
 })
 ```
+
+## Unreal Asset Inspector
+
+Opening `.uasset`, `.umap`, or other unreal binary assets. Gives some brief metadata and you can open it in an already running editor instance. (see remote api editor section)
+
+## Remote Editor API
+
+Interact with an already running Unreal Editor instance using pure Lua:
+
+```lua
+local remote = require("uproject.remote")
+
+-- Run Python code in the active editor for the current project
+remote.run_python("print('Hello from Neovim!')", {}, function(err, result)
+	if err then
+		vim.notify("Remote error: " .. err, vim.log.levels.ERROR)
+	else
+		vim.notify("Python executed successfully!", vim.log.levels.INFO)
+	end
+end)
+
+-- Open an asset by filesystem or package path
+remote.open_asset("/Game/Maps/Main", {}, function(err, success)
+	-- ...
+end)
+```
